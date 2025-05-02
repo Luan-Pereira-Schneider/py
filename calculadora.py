@@ -4,7 +4,7 @@ import os
 import platform
 import subprocess
 import json
-from datetime import datetime # Importado para lidar com datas
+from datetime import datetime, date # Importado date especificamente
 from typing import List, Dict, Any, Optional, Tuple
 
 # Verificação do ReportLab
@@ -49,8 +49,9 @@ class CalculadoraImobiliaria:
         self.entries: List[Dict[str, Any]] = []
         self.servicos_salvos: List[Dict[str, Any]] = []
         self.filtro_servicos_var = tk.StringVar()
-        self.filtro_data_inicio_var = tk.StringVar() # NOVO: para filtro data inicio
-        self.filtro_data_fim_var = tk.StringVar()    # NOVO: para filtro data fim
+        # self.filtro_data_inicio_var = tk.StringVar() # REMOVIDO
+        # self.filtro_data_fim_var = tk.StringVar()    # REMOVIDO
+        self.filtro_data_unica_var = tk.StringVar() # ADICIONADO
 
         self.carregar_servicos_salvos()
         self.configurar_estilo()
@@ -274,23 +275,32 @@ class CalculadoraImobiliaria:
         entry_filtro.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.filtro_servicos_var.trace_add("write", self._filtrar_servicos_salvos) # Filtrar ao digitar
 
-        # Filtro por Data
+        # --- INÍCIO DA MODIFICAÇÃO DO FILTRO DE DATA ---
+        # Filtro por Data Única
         frame_filtro_data = ttk.Frame(frame_filtros_geral)
         frame_filtro_data.pack(fill=tk.X, pady=(5, 0))
 
-        # Usando grid para melhor alinhamento dos filtros de data
-        frame_filtro_data.columnconfigure(1, weight=1)
-        frame_filtro_data.columnconfigure(3, weight=1)
+        ttk.Label(frame_filtro_data, text="Filtrar por Data (DD/MM/AAAA):", font=('Segoe UI', 10)).pack(side=tk.LEFT, padx=(0, 5))
+        entry_data_unica = ttk.Entry(frame_filtro_data, textvariable=self.filtro_data_unica_var, font=('Segoe UI', 10), width=15)
+        entry_data_unica.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Atualize o trace para chamar a mesma função de filtro
+        self.filtro_data_unica_var.trace_add("write", self._filtrar_servicos_salvos)
 
-        ttk.Label(frame_filtro_data, text="Data Início (DD/MM/AAAA):", font=('Segoe UI', 10)).grid(row=0, column=0, padx=(0, 5), sticky=tk.W)
-        entry_data_inicio = ttk.Entry(frame_filtro_data, textvariable=self.filtro_data_inicio_var, font=('Segoe UI', 10), width=12)
-        entry_data_inicio.grid(row=0, column=1, padx=(0, 10), sticky=tk.EW)
-        self.filtro_data_inicio_var.trace_add("write", self._filtrar_servicos_salvos) # Filtrar ao digitar
+        # REMOVA ou comente as linhas dos filtros de data_inicio e data_fim:
+        # frame_filtro_data = ttk.Frame(frame_filtros_geral)
+        # frame_filtro_data.pack(fill=tk.X, pady=(5, 0))
+        # frame_filtro_data.columnconfigure(1, weight=1)
+        # frame_filtro_data.columnconfigure(3, weight=1)
+        # ttk.Label(frame_filtro_data, text="Data Início (DD/MM/AAAA):", font=('Segoe UI', 10)).grid(row=0, column=0, padx=(0, 5), sticky=tk.W)
+        # entry_data_inicio = ttk.Entry(frame_filtro_data, textvariable=self.filtro_data_inicio_var, font=('Segoe UI', 10), width=12)
+        # entry_data_inicio.grid(row=0, column=1, padx=(0, 10), sticky=tk.EW)
+        # self.filtro_data_inicio_var.trace_add("write", self._filtrar_servicos_salvos) # Filtrar ao digitar
+        # ttk.Label(frame_filtro_data, text="Data Fim (DD/MM/AAAA):", font=('Segoe UI', 10)).grid(row=0, column=2, padx=(10, 5), sticky=tk.W)
+        # entry_data_fim = ttk.Entry(frame_filtro_data, textvariable=self.filtro_data_fim_var, font=('Segoe UI', 10), width=12)
+        # entry_data_fim.grid(row=0, column=3, padx=(0, 5), sticky=tk.EW)
+        # self.filtro_data_fim_var.trace_add("write", self._filtrar_servicos_salvos) # Filtrar ao digitar
+        # --- FIM DA MODIFICAÇÃO DO FILTRO DE DATA ---
 
-        ttk.Label(frame_filtro_data, text="Data Fim (DD/MM/AAAA):", font=('Segoe UI', 10)).grid(row=0, column=2, padx=(10, 5), sticky=tk.W)
-        entry_data_fim = ttk.Entry(frame_filtro_data, textvariable=self.filtro_data_fim_var, font=('Segoe UI', 10), width=12)
-        entry_data_fim.grid(row=0, column=3, padx=(0, 5), sticky=tk.EW)
-        self.filtro_data_fim_var.trace_add("write", self._filtrar_servicos_salvos) # Filtrar ao digitar
 
         # Treeview para Grupos
         frame_lista_scroll = ttk.Frame(parent_frame)
@@ -609,9 +619,8 @@ class CalculadoraImobiliaria:
             if self.salvar_servicos_no_arquivo():
                 # Atualiza a lista, limpando filtros para mostrar o novo item
                 self.filtro_servicos_var.set("")
-                self.filtro_data_inicio_var.set("")
-                self.filtro_data_fim_var.set("")
-                self.atualizar_lista_servicos_salvos()
+                self.filtro_data_unica_var.set("") # LIMPA O NOVO CAMPO
+                self.atualizar_lista_servicos_salvos() # ATUALIZA A LISTA (JÁ LÊ OS FILTROS VAZIOS)
                 dialogo.destroy()
                 messagebox.showinfo("Sucesso", f"Grupo '{nome_grupo}' salvo com sucesso!")
             # else: erro já foi mostrado em salvar_servicos_no_arquivo
@@ -674,30 +683,32 @@ class CalculadoraImobiliaria:
             messagebox.showerror("Erro ao Carregar Arquivo", f"Não foi possível carregar os dados de:\n{arquivo_dados}\nErro: {str(e)}")
             self.servicos_salvos = [] # Inicia vazio em caso de erro grave
 
-    # --- Funções de Filtragem e Atualização da Lista ---
+    # --- Funções de Filtragem e Atualização da Lista (MODIFICADAS) ---
 
     def _filtrar_servicos_salvos(self, *args):
         """Filtra a TreeView de serviços salvos com base nos filtros."""
         filtro_nome = self.filtro_servicos_var.get().lower()
-        filtro_data_inicio_str = self.filtro_data_inicio_var.get()
-        filtro_data_fim_str = self.filtro_data_fim_var.get()
+        # --- INÍCIO DA MODIFICAÇÃO ---
+        # Obtenha a data única do novo campo
+        filtro_data_unica_str = self.filtro_data_unica_var.get()
 
-        # Tenta converter as datas
-        data_inicio = self._get_date_from_string(filtro_data_inicio_str)
-        data_fim = self._get_date_from_string(filtro_data_fim_str)
+        # Tenta converter a data única
+        data_filtro = self._get_date_from_string(filtro_data_unica_str)
 
         # Adicionar feedback visual de data inválida (ex: borda vermelha) - Fica como sugestão
-        # entry_data_inicio = self.root.nametowidget(...) # precisaria guardar a ref do entry
-        # if filtro_data_inicio_str and data_inicio is None:
-        #     entry_data_inicio.config(...) # Borda vermelha
+        # entry_data_unica = self.root.nametowidget(...) # precisaria guardar a ref do entry
+        # if filtro_data_unica_str and data_filtro is None:
+        #     entry_data_unica.config(...) # Borda vermelha
         # else:
-        #     entry_data_inicio.config(...) # Borda normal
+        #     entry_data_unica.config(...) # Borda normal
 
-        self.atualizar_lista_servicos_salvos(filtro_nome, data_inicio, data_fim)
+        # Chame a atualização passando a data única (ou None se inválida/vazia)
+        self.atualizar_lista_servicos_salvos(filtro_nome, data_filtro)
+        # --- FIM DA MODIFICAÇÃO ---
 
+    # --- MODIFICADA A ASSINATURA E LÓGICA DE DATA ---
     def atualizar_lista_servicos_salvos(self, filtro_nome: str = "",
-                                     filtro_data_inicio: Optional[datetime.date] = None,
-                                     filtro_data_fim: Optional[datetime.date] = None):
+                                     filtro_data_unica: Optional[date] = None): # Renomeado e tipo Date
         """Atualiza a TreeView de serviços salvos, aplicando filtros."""
         # Limpa a árvore
         for item in self.tree_servicos.get_children():
@@ -723,20 +734,16 @@ class CalculadoraImobiliaria:
             if filtro_nome and filtro_nome not in nome.lower():
                 continue # Pula se não corresponder ao filtro de nome
 
-            # 2. Filtrar por data
+            # 2. Filtrar por data única (LÓGICA MODIFICADA)
             data_grupo = self._get_date_from_string(data_str)
-            if data_grupo: # Só filtra por data se a data do grupo for válida
-                # Verifica data de início
-                if filtro_data_inicio and data_grupo < filtro_data_inicio:
-                    continue # Pula se for anterior à data de início
-                # Verifica data de fim
-                if filtro_data_fim and data_grupo > filtro_data_fim:
-                    continue # Pula se for posterior à data de fim
-            elif filtro_data_inicio or filtro_data_fim:
-                 # Se há filtro de data mas a data do grupo é inválida, pula o grupo.
-                 print(f"Aviso: Grupo '{nome}' tem data inválida ('{data_str}') e foi pulado pelo filtro de data.")
-                 continue
-
+            if filtro_data_unica: # Se uma data de filtro foi fornecida e é válida
+                if not data_grupo: # Se o grupo não tem data válida, não pode corresponder
+                    print(f"Aviso: Grupo '{nome}' tem data inválida ('{data_str}') e foi pulado pelo filtro de data.")
+                    continue
+                # Compara se a data do grupo é DIFERENTE da data do filtro
+                if data_grupo != filtro_data_unica:
+                    continue # Pula se não for exatamente o dia do filtro
+            # Se filtro_data_unica for None (campo vazio ou inválido), não filtra por data
 
             # Se passou pelos filtros, adiciona na Treeview
             total = grupo.get('total', 0.0)
@@ -746,6 +753,7 @@ class CalculadoraImobiliaria:
             # Usa um IID prefixado com o índice ORIGINAL para recuperação posterior
             iid_grupo = f"grupo_{i}"
             self.tree_servicos.insert('', 'end', iid=iid_grupo, values=(nome, data_str, valor_formatado, num_itens))
+
 
     # --- Funções de Ação para Serviços Salvos (com ajuste para IID) ---
 
@@ -936,11 +944,11 @@ class CalculadoraImobiliaria:
                     return
                 else:
                     # A exclusão foi salva, atualiza a lista visual ANTES de carregar
-                    self.atualizar_lista_servicos_salvos(
-                        self.filtro_servicos_var.get().lower(),
-                        self._get_date_from_string(self.filtro_data_inicio_var.get()),
-                        self._get_date_from_string(self.filtro_data_fim_var.get())
-                    )
+                    # Limpa os filtros antes de atualizar a lista visual da exclusão
+                    filtro_nome_atual = self.filtro_servicos_var.get().lower()
+                    filtro_data_atual = self._get_date_from_string(self.filtro_data_unica_var.get())
+                    self.atualizar_lista_servicos_salvos(filtro_nome_atual, filtro_data_atual)
+
 
                 # 3. Agora, carrega os dados armazenados (grupo_original_data) na calculadora
                 # Reutiliza a lógica de carregar, mas com os dados em memória
@@ -976,16 +984,31 @@ class CalculadoraImobiliaria:
             messagebox.showerror("Erro ao Editar", f"Não foi possível iniciar a edição do grupo.\nErro: {e}", parent=self.root)
             # Se o erro ocorreu depois da exclusão, a lista pode estar inconsistente.
             # Recarregar a lista pode ser uma opção, mas pode perder o estado do filtro.
-            # self.carregar_servicos_salvos() # CUIDADO: Reseta a lista inteira
-            # self.atualizar_lista_servicos_salvos(...) # Tenta reatualizar com filtros
+            # Tenta reatualizar com filtros atuais como melhor esforço:
+            try:
+                filtro_nome_atual = self.filtro_servicos_var.get().lower()
+                filtro_data_atual = self._get_date_from_string(self.filtro_data_unica_var.get())
+                self.atualizar_lista_servicos_salvos(filtro_nome_atual, filtro_data_atual)
+            except Exception as update_err:
+                 print(f"Erro adicional ao tentar atualizar lista após falha na edição: {update_err}")
 
-    def _get_date_from_string(self, date_str: str) -> Optional[datetime.date]:
+
+    def _get_date_from_string(self, date_str: str) -> Optional[date]: # Retorna date
         """Tenta converter uma string DD/MM/YYYY para objeto date."""
         if not isinstance(date_str, str): return None # Garante que é string
         try:
-            if date_str:
-                return datetime.strptime(date_str.strip(), "%d/%m/%Y").date()
-        except ValueError:
+            # Tenta formatos comuns, incluindo DDMMYYYY
+            formats_to_try = ["%d/%m/%Y", "%d-%m-%Y", "%d%m%Y"]
+            parsed_date = None
+            for fmt in formats_to_try:
+                 try:
+                      parsed_date = datetime.strptime(date_str.strip(), fmt).date()
+                      break # Sai do loop se encontrar um formato válido
+                 except ValueError:
+                      continue # Tenta o próximo formato
+            return parsed_date # Retorna a data ou None se nenhum formato funcionou
+
+        except ValueError: # Captura erro final se nenhum formato funcionou
             pass # Ignora formato inválido
         return None
 
@@ -1052,11 +1075,11 @@ class CalculadoraImobiliaria:
             # Salva a lista atualizada no arquivo
             if self.salvar_servicos_no_arquivo():
                 # Atualiza a TreeView com os filtros atuais
-                self.atualizar_lista_servicos_salvos(
-                     self.filtro_servicos_var.get().lower(),
-                     self._get_date_from_string(self.filtro_data_inicio_var.get()),
-                     self._get_date_from_string(self.filtro_data_fim_var.get())
-                 )
+                # Busca os valores atuais dos filtros antes de chamar a atualização
+                filtro_nome_atual = self.filtro_servicos_var.get().lower()
+                filtro_data_atual = self._get_date_from_string(self.filtro_data_unica_var.get())
+                self.atualizar_lista_servicos_salvos(filtro_nome_atual, filtro_data_atual)
+
                 # Limpa os detalhes, pois o item pode ter sido excluído
                 for item in self.tree_detalhes.get_children():
                     self.tree_detalhes.delete(item)
