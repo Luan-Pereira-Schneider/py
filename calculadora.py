@@ -4,7 +4,7 @@ import os
 import platform
 import subprocess
 import json
-from datetime import datetime
+from datetime import datetime # Importado para lidar com datas
 from typing import List, Dict, Any, Optional, Tuple
 
 # Verificação do ReportLab
@@ -28,7 +28,7 @@ FONTE_PADRAO = ('Segoe UI', 11)
 FONTE_TITULO = ('Segoe UI', 18, 'bold')
 FONTE_LABEL_ENTRADA = ('Segoe UI', 9, 'bold')
 FONTE_RESULTADO = ('Segoe UI', 26, 'bold')
-FONTE_CABECALHO_TABELA = ('Helvetica-Bold', 12)
+FONTE_CABECALHO_TABELA = ('Helvetica-Bold', 11) # Reduzi levemente para caber melhor
 NOME_ARQUIVO_DADOS = "servicos_salvos.json"
 NOME_DIRETORIO_DADOS = ".calculadora_imobiliaria"
 
@@ -49,6 +49,8 @@ class CalculadoraImobiliaria:
         self.entries: List[Dict[str, Any]] = []
         self.servicos_salvos: List[Dict[str, Any]] = []
         self.filtro_servicos_var = tk.StringVar()
+        self.filtro_data_inicio_var = tk.StringVar() # NOVO: para filtro data inicio
+        self.filtro_data_fim_var = tk.StringVar()    # NOVO: para filtro data fim
 
         self.carregar_servicos_salvos()
         self.configurar_estilo()
@@ -69,7 +71,12 @@ class CalculadoraImobiliaria:
 
     def _formatar_moeda(self, valor: float) -> str:
         """Formata um valor float para o formato de moeda BRL."""
-        return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        try:
+             # Garante que é float antes de formatar
+             valor_float = float(valor)
+             return f"R$ {valor_float:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        except (ValueError, TypeError):
+             return "R$ Erro" # Retorna um valor indicando erro se não for número
 
     # --- Configuração da UI ---
     def configurar_estilo(self):
@@ -141,8 +148,10 @@ class CalculadoraImobiliaria:
         center_frame = tk.Frame(self.frame_rodape, bg=COR_PRIMARIA)
         center_frame.pack(expand=True, fill=tk.BOTH)
 
+        # Obtém o ano atual dinamicamente
+        ano_atual = datetime.now().year
         self.lbl_copyright = tk.Label(center_frame,
-                                     text=f"© {datetime.now().year} {self.nome_empresa}",
+                                     text=f"© {ano_atual} {self.nome_empresa}",
                                      bg=COR_PRIMARIA, fg=COR_SECUNDARIA, font=('Segoe UI', 9))
         self.lbl_copyright.pack()
 
@@ -189,7 +198,15 @@ class CalculadoraImobiliaria:
         # Bindings para scroll e resize
         self.frame_interno.bind("<Configure>", self._on_frame_configure)
         self.canvas.bind("<Configure>", self._on_canvas_configure)
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel) # Roda do mouse
+        # Bind para roda do mouse em diferentes plataformas
+        if platform.system() == "Windows":
+            self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        elif platform.system() == "Darwin": # macOS
+            self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        else: # Linux
+            self.canvas.bind_all("<Button-4>", self._on_mousewheel) # Rolar para cima
+            self.canvas.bind_all("<Button-5>", self._on_mousewheel) # Rolar para baixo
+
 
         # Botão Adicionar
         self.botao_adicionar = ttk.Button(parent_frame, text="✚ Adicionar Serviço", command=self.adicionar_servico_ui, width=20)
@@ -233,7 +250,7 @@ class CalculadoraImobiliaria:
         # Painel Esquerdo (Lista de Grupos e Filtro)
         frame_lista = ttk.Frame(frame_conteudo_salvos)
         frame_lista.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
-        self._criar_frame_lista_grupos(frame_lista)
+        self._criar_frame_lista_grupos(frame_lista) # Modificado para incluir filtros
 
         # Painel Direito (Detalhes do Grupo)
         self.frame_detalhes = ttk.Frame(frame_conteudo_salvos, relief=tk.GROOVE, borderwidth=1)
@@ -245,21 +262,43 @@ class CalculadoraImobiliaria:
 
     def _criar_frame_lista_grupos(self, parent_frame: ttk.Frame):
         """Cria a seção da lista de grupos salvos e filtro."""
-        # Filtro
-        frame_filtro = ttk.Frame(parent_frame)
-        frame_filtro.pack(fill=tk.X, pady=(0, 10))
-        ttk.Label(frame_filtro, text="Filtrar por nome:", font=('Segoe UI', 10)).pack(side=tk.LEFT, padx=(0, 5))
-        entry_filtro = ttk.Entry(frame_filtro, textvariable=self.filtro_servicos_var, font=('Segoe UI', 10))
+        # Frame para todos os filtros
+        frame_filtros_geral = ttk.Frame(parent_frame)
+        frame_filtros_geral.pack(fill=tk.X, pady=(0, 10))
+
+        # Filtro por Nome
+        frame_filtro_nome = ttk.Frame(frame_filtros_geral)
+        frame_filtro_nome.pack(fill=tk.X)
+        ttk.Label(frame_filtro_nome, text="Filtrar por nome:", font=('Segoe UI', 10), width=15).pack(side=tk.LEFT, padx=(0, 5)) # Largura fixa para alinhar
+        entry_filtro = ttk.Entry(frame_filtro_nome, textvariable=self.filtro_servicos_var, font=('Segoe UI', 10))
         entry_filtro.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.filtro_servicos_var.trace_add("write", self._filtrar_servicos_salvos) # Filtrar ao digitar
 
+        # Filtro por Data
+        frame_filtro_data = ttk.Frame(frame_filtros_geral)
+        frame_filtro_data.pack(fill=tk.X, pady=(5, 0))
+
+        # Usando grid para melhor alinhamento dos filtros de data
+        frame_filtro_data.columnconfigure(1, weight=1)
+        frame_filtro_data.columnconfigure(3, weight=1)
+
+        ttk.Label(frame_filtro_data, text="Data Início (DD/MM/AAAA):", font=('Segoe UI', 10)).grid(row=0, column=0, padx=(0, 5), sticky=tk.W)
+        entry_data_inicio = ttk.Entry(frame_filtro_data, textvariable=self.filtro_data_inicio_var, font=('Segoe UI', 10), width=12)
+        entry_data_inicio.grid(row=0, column=1, padx=(0, 10), sticky=tk.EW)
+        self.filtro_data_inicio_var.trace_add("write", self._filtrar_servicos_salvos) # Filtrar ao digitar
+
+        ttk.Label(frame_filtro_data, text="Data Fim (DD/MM/AAAA):", font=('Segoe UI', 10)).grid(row=0, column=2, padx=(10, 5), sticky=tk.W)
+        entry_data_fim = ttk.Entry(frame_filtro_data, textvariable=self.filtro_data_fim_var, font=('Segoe UI', 10), width=12)
+        entry_data_fim.grid(row=0, column=3, padx=(0, 5), sticky=tk.EW)
+        self.filtro_data_fim_var.trace_add("write", self._filtrar_servicos_salvos) # Filtrar ao digitar
+
         # Treeview para Grupos
         frame_lista_scroll = ttk.Frame(parent_frame)
-        frame_lista_scroll.pack(fill=tk.BOTH, expand=True)
+        frame_lista_scroll.pack(fill=tk.BOTH, expand=True, pady=(5,0)) # Espaço acima da lista
 
         colunas = ('nome', 'data', 'valor', 'itens')
         self.tree_servicos = ttk.Treeview(frame_lista_scroll, columns=colunas,
-                                         show='headings', selectmode='extended') # selectmode='extended' para multiselect
+                                         show='headings', selectmode='extended')
 
         self.tree_servicos.heading('nome', text='Nome do Grupo')
         self.tree_servicos.heading('data', text='Data')
@@ -289,7 +328,6 @@ class CalculadoraImobiliaria:
         ttk.Button(frame_acoes, text="✏️ Editar", command=self.editar_grupo_selecionado, width=12).pack(side=tk.LEFT, padx=3)
         ttk.Button(frame_acoes, text="🗑️ Excluir", command=self.excluir_grupos_selecionados, width=12).pack(side=tk.LEFT, padx=3)
         ttk.Button(frame_acoes, text="📄 Gerar PDF", command=self.gerar_pdf_grupo_selecionado, width=14).pack(side=tk.LEFT, padx=3)
-        # NOVO BOTÃO para múltiplos PDFs
         ttk.Button(frame_acoes, text="📄 Gerar PDF Selecionados", command=self.gerar_pdf_grupos_selecionados, width=22).pack(side=tk.LEFT, padx=3)
 
 
@@ -350,19 +388,16 @@ class CalculadoraImobiliaria:
         }
 
         # --- Linha 1: Serviço, Locação, Valor ---
-        # Serviço
         ttk.Label(frame_entrada, text="Serviço:", font=FONTE_LABEL_ENTRADA).grid(row=0, column=0, padx=(0, 5), pady=(1,0), sticky=tk.W)
         tipos_servico = ['Venda', 'Aluguel', 'Avaliação', 'Consultoria', 'Reforma', 'Documentação', 'Outro']
         combo_servico = ttk.Combobox(frame_entrada, values=tipos_servico, width=18, state="readonly", font=('Segoe UI', 10))
         combo_servico.current(0)
         combo_servico.grid(row=1, column=0, padx=(0, 10), pady=(0,1), sticky=tk.EW)
 
-        # Locação
         ttk.Label(frame_entrada, text="Locação:", font=FONTE_LABEL_ENTRADA).grid(row=0, column=1, padx=(0, 5), pady=(1,0), sticky=tk.W)
         entry_locacao = tk.Entry(frame_entrada, **entrada_estilo_tk)
         entry_locacao.grid(row=1, column=1, padx=(0, 10), pady=(0,1), sticky=tk.EW)
 
-        # Valor
         ttk.Label(frame_entrada, text="Valor (R$):", font=FONTE_LABEL_ENTRADA).grid(row=0, column=2, padx=(0, 5), pady=(1,0), sticky=tk.W)
         novo_entry_valor = tk.Entry(frame_entrada, justify=tk.RIGHT, width=15, **entrada_estilo_tk)
         novo_entry_valor.grid(row=1, column=2, padx=(0, 10), pady=(0,1), sticky=tk.EW)
@@ -373,7 +408,6 @@ class CalculadoraImobiliaria:
         entry_descricao.grid(row=3, column=0, columnspan=3, padx=(0, 10), pady=(0,1), sticky=tk.EW) # Colspan 3
 
         # --- Botão Remover ---
-        # Usando tk.Button para cor de fundo mais fácil
         btn_remover = tk.Button(frame_entrada, text="✕",
                                command=lambda f=frame_entrada: self.remover_servico_ui(f),
                                bg=COR_DESTAQUE, fg='white', font=('Segoe UI', 10, 'bold'),
@@ -464,14 +498,15 @@ class CalculadoraImobiliaria:
 
             valor_entry.config(highlightbackground=COR_BORDA, highlightcolor=COR_DESTAQUE) # Reseta borda
 
-            if not (servico or locacao or descricao or valor_text): # Pula linha completamente vazia
+            # Considera linha vazia se nenhum campo essencial estiver preenchido
+            if not (servico or locacao or descricao or valor_text):
                  continue
 
             valor = 0.0
             if valor_text:
                 try:
                     valor_limpo = ''.join(filter(lambda c: c.isdigit() or c == ',', valor_text)).replace(",", ".")
-                    if not valor_limpo: valor_limpo = '0'
+                    if not valor_limpo: valor_limpo = '0' # Considera vazio como 0
                     valor = float(valor_limpo)
                 except ValueError:
                     valor_entry.config(highlightbackground='red', highlightcolor='red')
@@ -479,12 +514,13 @@ class CalculadoraImobiliaria:
                     valor_entry.focus_set()
                     erro = True
                     break # Para na primeira linha com erro
+            # Se valor_text for vazio, valor continua 0.0
 
             dados_servicos.append({
                 'servico': servico,
                 'locacao': locacao,
                 'descricao': descricao,
-                'valor': valor
+                'valor': valor # Salva como float
             })
             total += valor
 
@@ -542,15 +578,22 @@ class CalculadoraImobiliaria:
                 entry_nome.focus_set()
                 return
 
-            # Verifica se nome já existe (opcional, mas bom)
-            if any(g['nome'].lower() == nome_grupo.lower() for g in self.servicos_salvos):
+            grupo_existente = None
+            indice_existente = -1
+            for i, g in enumerate(self.servicos_salvos):
+                if g['nome'].lower() == nome_grupo.lower():
+                    grupo_existente = g
+                    indice_existente = i
+                    break
+
+            if grupo_existente:
                  if not messagebox.askyesno("Nome Duplicado", f"Já existe um grupo chamado '{nome_grupo}'.\nDeseja sobrescrevê-lo?", parent=dialogo):
                       entry_nome.focus_set()
                       return
                  else:
-                     # Remove o grupo existente antes de adicionar o novo
-                     self.servicos_salvos = [g for g in self.servicos_salvos if g['nome'].lower() != nome_grupo.lower()]
-
+                    # Remove o grupo existente antes de adicionar o novo (usando o índice encontrado)
+                    if indice_existente != -1:
+                        del self.servicos_salvos[indice_existente]
 
             grupo = {
                 'nome': nome_grupo,
@@ -560,10 +603,14 @@ class CalculadoraImobiliaria:
             }
 
             self.servicos_salvos.append(grupo)
-            # Ordena alfabeticamente (opcional)
+            # Ordena alfabeticamente (opcional, mas bom para consistência)
             self.servicos_salvos.sort(key=lambda g: g['nome'].lower())
 
             if self.salvar_servicos_no_arquivo():
+                # Atualiza a lista, limpando filtros para mostrar o novo item
+                self.filtro_servicos_var.set("")
+                self.filtro_data_inicio_var.set("")
+                self.filtro_data_fim_var.set("")
                 self.atualizar_lista_servicos_salvos()
                 dialogo.destroy()
                 messagebox.showinfo("Sucesso", f"Grupo '{nome_grupo}' salvo com sucesso!")
@@ -581,6 +628,15 @@ class CalculadoraImobiliaria:
         """Salva a lista completa de serviços salvos no arquivo JSON."""
         arquivo_dados = self._obter_caminho_arquivo_dados()
         try:
+            # Cria backup antes de salvar
+            if os.path.exists(arquivo_dados):
+                try:
+                    backup_path = arquivo_dados + ".bak"
+                    import shutil
+                    shutil.copy2(arquivo_dados, backup_path)
+                except Exception as backup_err:
+                     print(f"Aviso: Falha ao criar backup de {arquivo_dados}: {backup_err}")
+
             with open(arquivo_dados, 'w', encoding='utf-8') as f:
                 json.dump(self.servicos_salvos, f, ensure_ascii=False, indent=4) # indent=4 para legibilidade
             return True
@@ -598,24 +654,51 @@ class CalculadoraImobiliaria:
         try:
             with open(arquivo_dados, 'r', encoding='utf-8') as f:
                 self.servicos_salvos = json.load(f)
-                # Validação básica (opcional)
+                # Validação básica
                 if not isinstance(self.servicos_salvos, list):
                     print("Arquivo de dados corrompido (não é uma lista). Iniciando com lista vazia.")
                     self.servicos_salvos = []
+                else:
+                    # Validar estrutura interna (opcional, mas recomendado)
+                    for i, grupo in enumerate(self.servicos_salvos):
+                         if not isinstance(grupo, dict) or 'nome' not in grupo or 'itens' not in grupo:
+                              print(f"Aviso: Grupo inválido encontrado no índice {i}. Removendo.")
+                              # Poderia remover o item inválido aqui
+                              pass # Por enquanto só avisa
+                # Ordenar ao carregar (opcional, mas garante consistência)
+                self.servicos_salvos.sort(key=lambda g: g.get('nome', '').lower())
         except json.JSONDecodeError:
-             messagebox.showerror("Erro ao Carregar", f"Arquivo de dados '{NOME_ARQUIVO_DADOS}' parece estar corrompido.\nSerá iniciado com uma lista vazia.")
+             messagebox.showerror("Erro ao Carregar", f"Arquivo de dados '{NOME_ARQUIVO_DADOS}' parece estar corrompido.\nVerifique o arquivo ou restaure um backup (.bak, se existir).\nSerá iniciado com uma lista vazia.")
              self.servicos_salvos = []
         except Exception as e:
             messagebox.showerror("Erro ao Carregar Arquivo", f"Não foi possível carregar os dados de:\n{arquivo_dados}\nErro: {str(e)}")
             self.servicos_salvos = [] # Inicia vazio em caso de erro grave
 
-    def _filtrar_servicos_salvos(self, *args):
-        """Filtra a TreeView de serviços salvos com base no texto do filtro."""
-        filtro = self.filtro_servicos_var.get().lower()
-        self.atualizar_lista_servicos_salvos(filtro)
+    # --- Funções de Filtragem e Atualização da Lista ---
 
-    def atualizar_lista_servicos_salvos(self, filtro: str = ""):
-        """Atualiza a TreeView de serviços salvos, aplicando um filtro opcional."""
+    def _filtrar_servicos_salvos(self, *args):
+        """Filtra a TreeView de serviços salvos com base nos filtros."""
+        filtro_nome = self.filtro_servicos_var.get().lower()
+        filtro_data_inicio_str = self.filtro_data_inicio_var.get()
+        filtro_data_fim_str = self.filtro_data_fim_var.get()
+
+        # Tenta converter as datas
+        data_inicio = self._get_date_from_string(filtro_data_inicio_str)
+        data_fim = self._get_date_from_string(filtro_data_fim_str)
+
+        # Adicionar feedback visual de data inválida (ex: borda vermelha) - Fica como sugestão
+        # entry_data_inicio = self.root.nametowidget(...) # precisaria guardar a ref do entry
+        # if filtro_data_inicio_str and data_inicio is None:
+        #     entry_data_inicio.config(...) # Borda vermelha
+        # else:
+        #     entry_data_inicio.config(...) # Borda normal
+
+        self.atualizar_lista_servicos_salvos(filtro_nome, data_inicio, data_fim)
+
+    def atualizar_lista_servicos_salvos(self, filtro_nome: str = "",
+                                     filtro_data_inicio: Optional[datetime.date] = None,
+                                     filtro_data_fim: Optional[datetime.date] = None):
+        """Atualiza a TreeView de serviços salvos, aplicando filtros."""
         # Limpa a árvore
         for item in self.tree_servicos.get_children():
             self.tree_servicos.delete(item)
@@ -628,21 +711,71 @@ class CalculadoraImobiliaria:
 
         # Adiciona itens filtrados
         for i, grupo in enumerate(self.servicos_salvos):
-            nome = grupo.get('nome', 'Sem Nome')
-            if filtro and filtro not in nome.lower():
-                continue # Pula se não corresponder ao filtro
+            # Validar se o grupo é um dicionário antes de tentar acessar
+            if not isinstance(grupo, dict):
+                print(f"Aviso: Item inválido na lista self.servicos_salvos no índice {i}. Pulando.")
+                continue
 
-            data = grupo.get('data', '??/??/????')
+            nome = grupo.get('nome', 'Sem Nome')
+            data_str = grupo.get('data', '??/??/????')
+
+            # 1. Filtrar por nome
+            if filtro_nome and filtro_nome not in nome.lower():
+                continue # Pula se não corresponder ao filtro de nome
+
+            # 2. Filtrar por data
+            data_grupo = self._get_date_from_string(data_str)
+            if data_grupo: # Só filtra por data se a data do grupo for válida
+                # Verifica data de início
+                if filtro_data_inicio and data_grupo < filtro_data_inicio:
+                    continue # Pula se for anterior à data de início
+                # Verifica data de fim
+                if filtro_data_fim and data_grupo > filtro_data_fim:
+                    continue # Pula se for posterior à data de fim
+            elif filtro_data_inicio or filtro_data_fim:
+                 # Se há filtro de data mas a data do grupo é inválida, pula o grupo.
+                 print(f"Aviso: Grupo '{nome}' tem data inválida ('{data_str}') e foi pulado pelo filtro de data.")
+                 continue
+
+
+            # Se passou pelos filtros, adiciona na Treeview
             total = grupo.get('total', 0.0)
             num_itens = len(grupo.get('itens', []))
             valor_formatado = self._formatar_moeda(total)
 
-            # Usa o índice original como ID para fácil recuperação
-            self.tree_servicos.insert('', 'end', iid=str(i), values=(nome, data, valor_formatado, num_itens))
+            # Usa um IID prefixado com o índice ORIGINAL para recuperação posterior
+            iid_grupo = f"grupo_{i}"
+            self.tree_servicos.insert('', 'end', iid=iid_grupo, values=(nome, data_str, valor_formatado, num_itens))
+
+    # --- Funções de Ação para Serviços Salvos (com ajuste para IID) ---
+
+    def _get_index_from_iid(self, iid_str: str) -> Optional[int]:
+        """Extrai o índice original da lista a partir do IID da Treeview."""
+        if isinstance(iid_str, str) and iid_str.startswith("grupo_"):
+            try:
+                index = int(iid_str.split('_')[1])
+                # Validação extra: Verifica se o índice ainda é válido na lista atual
+                if 0 <= index < len(self.servicos_salvos):
+                     # Verifica se o item no índice corresponde minimamente (opcional, mas bom)
+                     # if self.servicos_salvos[index].get('nome') == self.tree_servicos.item(iid_str, 'values')[0]:
+                     return index
+                     # else:
+                     #     print(f"Aviso: Inconsistência entre IID {iid_str} (índice {index}) e dados atuais.")
+                     #     return None
+                else:
+                     # O índice está fora dos limites. A lista pode ter mudado (excluído item?)
+                     # Não deve acontecer se a atualização da treeview for feita corretamente.
+                     print(f"Aviso: Índice {index} do IID '{iid_str}' está fora dos limites da lista atual ({len(self.servicos_salvos)} itens).")
+                     return None
+            except (ValueError, IndexError, TypeError):
+                print(f"Erro ao extrair índice do IID: {iid_str}")
+                return None
+        # print(f"Formato de IID inválido ou tipo incorreto: {iid_str} (Tipo: {type(iid_str)})")
+        return None
 
     def exibir_detalhes_grupo(self, event=None):
-        """Exibe os detalhes do(s) grupo(s) selecionado(s) na TreeView."""
-        selection = self.tree_servicos.selection() # Pode retornar múltiplos IDs com selectmode='extended'
+        """Exibe os detalhes do primeiro grupo selecionado na TreeView."""
+        selection = self.tree_servicos.selection()
 
         # Limpa detalhes anteriores
         for item in self.tree_detalhes.get_children():
@@ -652,30 +785,43 @@ class CalculadoraImobiliaria:
             self.lbl_titulo_detalhes.config(text="Detalhes do Grupo")
             return
 
-        # Se múltiplos selecionados, mostra detalhes do primeiro
-        primeiro_item_id = selection[0]
-        try:
-            # O IID da TreeView foi definido como o índice na lista self.servicos_salvos
-            index = int(primeiro_item_id)
-            if 0 <= index < len(self.servicos_salvos):
+        primeiro_item_id_str = selection[0]
+        index = self._get_index_from_iid(primeiro_item_id_str)
+
+        if index is not None:
+            try:
                 grupo = self.servicos_salvos[index]
+                # Verifica se grupo é um dicionário
+                if not isinstance(grupo, dict):
+                     raise TypeError(f"Item no índice {index} não é um dicionário.")
+
                 nome = grupo.get('nome', 'Sem Nome')
                 self.lbl_titulo_detalhes.config(text=f"Detalhes: {nome}")
 
-                for item in grupo.get('itens', []):
+                itens_grupo = grupo.get('itens', [])
+                if not isinstance(itens_grupo, list): # Valida se 'itens' é lista
+                     print(f"Aviso: 'itens' no grupo '{nome}' não é uma lista. Detalhes podem estar incompletos.")
+                     itens_grupo = []
+
+                for item in itens_grupo:
+                    # Valida se cada item é um dicionário
+                    if not isinstance(item, dict):
+                         print(f"Aviso: Item inválido encontrado nos detalhes do grupo '{nome}'. Pulando.")
+                         continue
+
                     servico = item.get('servico', '')
                     locacao = item.get('locacao', '')
                     descricao = item.get('descricao', '')
                     valor = item.get('valor', 0.0)
                     valor_formatado = self._formatar_moeda(valor)
                     self.tree_detalhes.insert('', 'end', values=(servico, locacao, descricao, valor_formatado))
-            else:
-                 print(f"Índice inválido recuperado da seleção: {index}")
-                 self.lbl_titulo_detalhes.config(text="Erro ao carregar detalhes")
-
-        except (ValueError, IndexError) as e:
-            print(f"Erro ao processar seleção {primeiro_item_id}: {e}")
-            self.lbl_titulo_detalhes.config(text="Erro ao carregar detalhes")
+            except (IndexError, TypeError, Exception) as e: # Captura erro de índice, tipo ou outro inesperado
+                print(f"Erro ao acessar/processar dados do grupo no índice {index}: {e}")
+                self.lbl_titulo_detalhes.config(text="Erro ao carregar detalhes")
+                messagebox.showerror("Erro Detalhes", f"Não foi possível exibir os detalhes do grupo selecionado.\nErro: {e}", parent=self.root)
+        else:
+             # Se _get_index_from_iid retornou None, o IID era inválido ou o índice não existe mais
+             self.lbl_titulo_detalhes.config(text="Erro ao encontrar grupo")
 
 
     def carregar_grupo_na_calculadora(self):
@@ -687,45 +833,68 @@ class CalculadoraImobiliaria:
         if len(selection) > 1:
              messagebox.showwarning("Múltiplos Grupos", "Apenas o primeiro grupo selecionado será carregado na calculadora.", parent=self.root)
 
+        primeiro_item_id_str = selection[0]
+        index = self._get_index_from_iid(primeiro_item_id_str)
 
-        primeiro_item_id = selection[0]
+        if index is None:
+            messagebox.showerror("Erro ao Carregar", "Não foi possível encontrar o grupo selecionado (índice inválido ou inconsistente).", parent=self.root)
+            return
+
         try:
-            index = int(primeiro_item_id)
-            if not (0 <= index < len(self.servicos_salvos)):
-                raise IndexError("Índice fora do limite")
-
             grupo = self.servicos_salvos[index]
+            # Validações básicas
+            if not isinstance(grupo, dict): raise TypeError("Formato de grupo inválido.")
             nome_grupo = grupo.get('nome', 'Sem Nome')
+            itens_grupo = grupo.get('itens', [])
+            if not isinstance(itens_grupo, list): raise TypeError("Formato de itens inválido.")
 
-            if self.entries:
+
+            if self.entries: # Verifica se há algo na calculadora
                 if not messagebox.askyesno("Confirmar Carregamento",
                                          f"Isto substituirá os dados atuais na calculadora pelo grupo '{nome_grupo}'.\nContinuar?",
                                          parent=self.root):
                     return
 
-            # Limpa campos atuais antes de carregar
-            self.limpar_campos()
+            # Limpa campos atuais SOMENTE se o usuário confirmar ou se estiver vazio
+            while self.entries: # Limpa a lista e a UI
+                self.remover_servico_ui(self.entries[0]['frame'])
 
             # Adiciona itens do grupo à calculadora
-            for item in grupo.get('itens', []):
+            for item_dict in itens_grupo:
+                # Valida cada item antes de usar
+                if not isinstance(item_dict, dict):
+                     print(f"Aviso: Item inválido no grupo '{nome_grupo}' ignorado durante o carregamento.")
+                     continue
+
                 self.adicionar_servico_ui() # Cria a linha na UI
                 entry_info = self.entries[-1] # Pega a última linha adicionada
 
-                entry_info['servico'].set(item.get('servico', ''))
+                entry_info['servico'].set(item_dict.get('servico', ''))
                 # Limpa e insere nos tk.Entry
                 entry_info['locacao'].delete(0, tk.END)
-                entry_info['locacao'].insert(0, item.get('locacao', ''))
+                entry_info['locacao'].insert(0, item_dict.get('locacao', ''))
                 entry_info['descricao'].delete(0, tk.END)
-                entry_info['descricao'].insert(0, item.get('descricao', ''))
+                entry_info['descricao'].insert(0, item_dict.get('descricao', ''))
                 entry_info['valor'].delete(0, tk.END)
-                entry_info['valor'].insert(0, f"{item.get('valor', 0.0):.2f}".replace('.', ',')) # Formato para entrada
+
+                # Formata o valor para exibição no Entry (com vírgula decimal)
+                try:
+                    valor_float = float(item_dict.get('valor', 0.0))
+                    valor_str = f"{valor_float:.2f}".replace('.', ',')
+                except (ValueError, TypeError):
+                    valor_str = "0,00" # Valor padrão em caso de erro
+                entry_info['valor'].insert(0, valor_str)
+
 
             # Mudar para a aba da calculadora
             self.notebook.select(self.tab_calculadora)
             messagebox.showinfo("Sucesso", f"Grupo '{nome_grupo}' carregado na calculadora!", parent=self.root)
 
-        except (ValueError, IndexError) as e:
-            messagebox.showerror("Erro ao Carregar", f"Não foi possível encontrar ou carregar o grupo selecionado.\nErro: {e}", parent=self.root)
+        except (IndexError, TypeError, Exception) as e: # Captura erro de índice, tipo ou outro inesperado
+            messagebox.showerror("Erro ao Carregar", f"Não foi possível carregar o grupo selecionado.\nErro: {e}", parent=self.root)
+            # Pode ser útil limpar a calculadora se o carregamento falhou no meio
+            while self.entries:
+                self.remover_servico_ui(self.entries[0]['frame'])
 
 
     def editar_grupo_selecionado(self):
@@ -737,39 +906,88 @@ class CalculadoraImobiliaria:
         if len(selection) > 1:
              messagebox.showwarning("Múltiplos Grupos", "Apenas o primeiro grupo selecionado será carregado para edição.", parent=self.root)
 
-        primeiro_item_id = selection[0]
-        try:
-            index = int(primeiro_item_id)
-            if not (0 <= index < len(self.servicos_salvos)):
-                raise IndexError("Índice fora do limite")
+        primeiro_item_id_str = selection[0]
+        index_para_editar = self._get_index_from_iid(primeiro_item_id_str)
 
-            nome_grupo = self.servicos_salvos[index].get('nome', 'Sem Nome')
+        if index_para_editar is None:
+            messagebox.showerror("Erro ao Editar", "Não foi possível encontrar o grupo selecionado para edição (índice inválido ou inconsistente).", parent=self.root)
+            return
+
+        try:
+            # Valida antes de pegar o nome
+            if not (0 <= index_para_editar < len(self.servicos_salvos) and isinstance(self.servicos_salvos[index_para_editar], dict)):
+                 raise IndexError("Índice ou tipo de dado inválido para edição.")
+            nome_grupo = self.servicos_salvos[index_para_editar].get('nome', 'Sem Nome')
 
             if messagebox.askyesno("Confirmar Edição",
                                  f"O grupo '{nome_grupo}' será carregado na calculadora e removido da lista de salvos.\n"
                                  "Você poderá salvá-lo novamente com as alterações.\n\nContinuar?",
                                  parent=self.root):
 
-                # Carrega na calculadora (já faz a limpeza e troca de aba)
-                self.carregar_grupo_na_calculadora()
+                # 1. Armazena temporariamente os dados do grupo ANTES de qualquer modificação
+                grupo_original_data = self.servicos_salvos[index_para_editar]
 
-                # Exclui o grupo original da lista e do arquivo *após* carregar
-                # Precisa recalcular o índice caso a lista tenha sido filtrada/modificada
-                try:
-                    # Busca novamente pelo nome, pois o índice pode ter mudado se houve filtro
-                    idx_real = next(i for i, g in enumerate(self.servicos_salvos) if g.get('nome') == nome_grupo)
-                    del self.servicos_salvos[idx_real]
-                    self.salvar_servicos_no_arquivo()
-                    self.atualizar_lista_servicos_salvos() # Atualiza a lista sem o item editado
-                except StopIteration:
-                     messagebox.showwarning("Aviso","Não foi possível remover o grupo original da lista (talvez já tenha sido removido).", parent=self.root)
-                except Exception as e:
-                     messagebox.showerror("Erro ao Remover", f"Erro ao remover grupo original '{nome_grupo}': {e}", parent=self.root)
+                # 2. Exclui o grupo original da lista e do arquivo PRIMEIRO
+                del self.servicos_salvos[index_para_editar]
+                if not self.salvar_servicos_no_arquivo():
+                    # Se falhar ao salvar a exclusão, restaura o grupo na lista e aborta
+                    self.servicos_salvos.insert(index_para_editar, grupo_original_data)
+                    messagebox.showerror("Erro ao Salvar", "Não foi possível salvar a remoção do grupo original. A edição foi cancelada.", parent=self.root)
+                    return
+                else:
+                    # A exclusão foi salva, atualiza a lista visual ANTES de carregar
+                    self.atualizar_lista_servicos_salvos(
+                        self.filtro_servicos_var.get().lower(),
+                        self._get_date_from_string(self.filtro_data_inicio_var.get()),
+                        self._get_date_from_string(self.filtro_data_fim_var.get())
+                    )
+
+                # 3. Agora, carrega os dados armazenados (grupo_original_data) na calculadora
+                # Reutiliza a lógica de carregar, mas com os dados em memória
+                if self.entries: # Limpa calculadora se necessário (sem perguntar de novo)
+                     while self.entries:
+                          self.remover_servico_ui(self.entries[0]['frame'])
+
+                itens_originais = grupo_original_data.get('itens', [])
+                if not isinstance(itens_originais, list): itens_originais = []
+
+                for item_dict in itens_originais:
+                     if not isinstance(item_dict, dict): continue
+                     self.adicionar_servico_ui()
+                     entry_info = self.entries[-1]
+                     entry_info['servico'].set(item_dict.get('servico', ''))
+                     entry_info['locacao'].delete(0, tk.END)
+                     entry_info['locacao'].insert(0, item_dict.get('locacao', ''))
+                     entry_info['descricao'].delete(0, tk.END)
+                     entry_info['descricao'].insert(0, item_dict.get('descricao', ''))
+                     entry_info['valor'].delete(0, tk.END)
+                     try:
+                          valor_float = float(item_dict.get('valor', 0.0))
+                          valor_str = f"{valor_float:.2f}".replace('.', ',')
+                     except (ValueError, TypeError): valor_str = "0,00"
+                     entry_info['valor'].insert(0, valor_str)
+
+                # 4. Muda para a aba da calculadora
+                self.notebook.select(self.tab_calculadora)
+                messagebox.showinfo("Pronto para Editar", f"Grupo '{nome_grupo}' carregado para edição. Faça suas alterações e salve novamente.", parent=self.root)
 
 
-        except (ValueError, IndexError) as e:
-            messagebox.showerror("Erro ao Editar", f"Não foi possível encontrar o grupo para edição.\nErro: {e}", parent=self.root)
+        except (IndexError, TypeError, Exception) as e: # Captura erro ao obter nome, confirmar, excluir ou carregar
+            messagebox.showerror("Erro ao Editar", f"Não foi possível iniciar a edição do grupo.\nErro: {e}", parent=self.root)
+            # Se o erro ocorreu depois da exclusão, a lista pode estar inconsistente.
+            # Recarregar a lista pode ser uma opção, mas pode perder o estado do filtro.
+            # self.carregar_servicos_salvos() # CUIDADO: Reseta a lista inteira
+            # self.atualizar_lista_servicos_salvos(...) # Tenta reatualizar com filtros
 
+    def _get_date_from_string(self, date_str: str) -> Optional[datetime.date]:
+        """Tenta converter uma string DD/MM/YYYY para objeto date."""
+        if not isinstance(date_str, str): return None # Garante que é string
+        try:
+            if date_str:
+                return datetime.strptime(date_str.strip(), "%d/%m/%Y").date()
+        except ValueError:
+            pass # Ignora formato inválido
+        return None
 
     def excluir_grupos_selecionados(self):
         """Exclui o(s) grupo(s) selecionado(s) da lista e do arquivo."""
@@ -779,19 +997,28 @@ class CalculadoraImobiliaria:
             return
 
         nomes_grupos = []
-        indices_para_excluir = set() # Usar set para evitar duplicatas e facilitar remoção
+        indices_para_excluir = set() # Usar set para evitar duplicatas e lidar com índices inválidos
+
         for item_id in selection:
-            try:
-                index = int(item_id)
-                if 0 <= index < len(self.servicos_salvos):
-                    nomes_grupos.append(self.servicos_salvos[index].get('nome', 'Sem Nome'))
-                    indices_para_excluir.add(index)
-            except (ValueError, IndexError):
+            index = self._get_index_from_iid(item_id)
+            if index is not None:
+                 # Verifica se o índice é realmente válido ANTES de adicionar ao set
+                 if 0 <= index < len(self.servicos_salvos):
+                     indices_para_excluir.add(index)
+                     # Pega o nome apenas para a mensagem de confirmação
+                     try:
+                        nome = self.servicos_salvos[index].get('nome', f'Índice {index} Sem Nome')
+                        nomes_grupos.append(nome)
+                     except Exception: # Se houver erro ao pegar nome, ainda tenta excluir pelo índice
+                        nomes_grupos.append(f"Grupo no índice {index}")
+                 else:
+                      print(f"Aviso: Índice {index} do IID {item_id} é inválido para a lista atual.")
+            else:
                  print(f"Item selecionado inválido ignorado: {item_id}")
 
 
         if not indices_para_excluir:
-             messagebox.showwarning("Seleção Inválida", "Nenhum grupo válido encontrado na seleção.", parent=self.root)
+             messagebox.showwarning("Seleção Inválida", "Nenhum grupo válido encontrado na seleção para excluir.", parent=self.root)
              return
 
         nomes_str = "\n - ".join(nomes_grupos)
@@ -806,42 +1033,75 @@ class CalculadoraImobiliaria:
             # Remove os itens da lista self.servicos_salvos pelos índices
             # É mais seguro remover pelos índices em ordem reversa para não afetar os índices subsequentes
             indices_ordenados_reverso = sorted(list(indices_para_excluir), reverse=True)
+            grupos_removidos_cont = 0
             for index in indices_ordenados_reverso:
                 try:
-                    del self.servicos_salvos[index]
+                    # Confirma novamente se o índice ainda é válido antes de deletar
+                    if 0 <= index < len(self.servicos_salvos):
+                         del self.servicos_salvos[index]
+                         grupos_removidos_cont += 1
+                    else:
+                         print(f"Erro: Índice {index} tornou-se inválido antes da exclusão (pulado).")
                 except IndexError:
-                     print(f"Erro: Índice {index} já não existia ao tentar excluir.") # Segurança extra
+                     print(f"Erro: Índice {index} já não existia ao tentar excluir (pulado).") # Segurança extra
+
+            if grupos_removidos_cont < num_grupos:
+                 messagebox.showwarning("Aviso de Exclusão", f"{num_grupos - grupos_removidos_cont} grupo(s) não puderam ser removidos pois seus índices se tornaram inválidos durante o processo.", parent=self.root)
+
 
             # Salva a lista atualizada no arquivo
             if self.salvar_servicos_no_arquivo():
-                # Atualiza a TreeView
-                self.atualizar_lista_servicos_salvos()
+                # Atualiza a TreeView com os filtros atuais
+                self.atualizar_lista_servicos_salvos(
+                     self.filtro_servicos_var.get().lower(),
+                     self._get_date_from_string(self.filtro_data_inicio_var.get()),
+                     self._get_date_from_string(self.filtro_data_fim_var.get())
+                 )
                 # Limpa os detalhes, pois o item pode ter sido excluído
                 for item in self.tree_detalhes.get_children():
                     self.tree_detalhes.delete(item)
                 self.lbl_titulo_detalhes.config(text="Detalhes do Grupo")
-                messagebox.showinfo("Sucesso", f"{num_grupos} grupo{plural_s} excluído{plural_s} com sucesso!", parent=self.root)
+                if grupos_removidos_cont > 0:
+                     messagebox.showinfo("Sucesso", f"{grupos_removidos_cont} grupo{plural_s if grupos_removidos_cont > 1 else ''} excluído{plural_s if grupos_removidos_cont > 1 else ''} com sucesso!", parent=self.root)
+            # else: O erro já foi mostrado ao salvar
 
     # --- Geração de PDF ---
 
     def _preparar_dados_pdf_grupo(self, index: int) -> Optional[Dict[str, Any]]:
-        """Prepara os dados de um único grupo para o formato do PDF."""
+        """Prepara os dados de um único grupo para o formato do PDF.
+           Valida o índice e o tipo de dado antes de usar.
+        """
         if not (0 <= index < len(self.servicos_salvos)):
+            print(f"Erro interno: Índice inválido {index} para preparar dados PDF.")
             return None
 
-        grupo = self.servicos_salvos[index]
+        grupo_raw = self.servicos_salvos[index]
+        if not isinstance(grupo_raw, dict):
+            print(f"Erro interno: Dado no índice {index} não é um dicionário.")
+            return None
+
         dados_formatados = {
-            'nome_grupo': grupo.get('nome', 'Grupo Sem Nome'),
-            'total': grupo.get('total', 0.0),
+            'nome_grupo': grupo_raw.get('nome', 'Grupo Sem Nome'),
+            'total': grupo_raw.get('total', 0.0),
             'itens': []
         }
-        for item in grupo.get('itens', []):
-            dados_formatados['itens'].append({
-                'servico': item.get('servico', ''),
-                'locacao': item.get('locacao', ''),
-                'descricao': item.get('descricao', ''),
-                'valor': item.get('valor', 0.0)
-            })
+
+        itens_raw = grupo_raw.get('itens', [])
+        if not isinstance(itens_raw, list):
+             print(f"Aviso: 'itens' no grupo '{dados_formatados['nome_grupo']}' não é uma lista. PDF pode ficar incompleto.")
+             itens_raw = [] # Trata como lista vazia
+
+        for item_raw in itens_raw:
+            if isinstance(item_raw, dict): # Garante que cada item é um dicionário
+                dados_formatados['itens'].append({
+                    'servico': item_raw.get('servico', ''), # Default para string vazia
+                    'locacao': item_raw.get('locacao', ''),
+                    'descricao': item_raw.get('descricao', ''),
+                    'valor': item_raw.get('valor', 0.0) # Default para 0.0
+                })
+            else:
+                 print(f"Aviso: Item inválido encontrado no grupo '{dados_formatados['nome_grupo']}'. Ignorado no PDF.")
+
         return dados_formatados
 
     def gerar_pdf_grupo_selecionado(self):
@@ -857,18 +1117,27 @@ class CalculadoraImobiliaria:
         if len(selection) > 1:
              messagebox.showwarning("Múltiplos Grupos", "Apenas o PDF do primeiro grupo selecionado será gerado.", parent=self.root)
 
+        primeiro_item_id_str = selection[0]
+        index = self._get_index_from_iid(primeiro_item_id_str)
 
-        primeiro_item_id = selection[0]
+        if index is None:
+            messagebox.showerror("Erro ao Gerar PDF", "Não foi possível encontrar o grupo selecionado (índice inválido ou inconsistente).", parent=self.root)
+            return
+
         try:
-            index = int(primeiro_item_id)
             dados_grupo = self._preparar_dados_pdf_grupo(index)
             if dados_grupo:
+                # Sugere nome baseado no grupo
+                nome_sugerido = f"Orcamento_{dados_grupo['nome_grupo']}.pdf"
+                # Limpa caracteres inválidos para nome de arquivo
+                nome_sugerido = "".join(c if c.isalnum() or c in ['_', '-'] else '_' for c in nome_sugerido)
                 # Chama gerar_pdf com uma lista contendo apenas este grupo
-                self.gerar_pdf(grupos_para_pdf=[dados_grupo])
+                self.gerar_pdf(grupos_para_pdf=[dados_grupo], nome_arquivo_sugerido=nome_sugerido)
             else:
-                raise ValueError("Grupo não encontrado ou inválido.")
-        except (ValueError, IndexError) as e:
-            messagebox.showerror("Erro ao Gerar PDF", f"Não foi possível obter os dados do grupo selecionado.\nErro: {e}", parent=self.root)
+                # _preparar_dados_pdf_grupo retornou None
+                raise ValueError("Falha ao preparar dados do grupo selecionado (verifique logs/console).")
+        except Exception as e: # Captura erro na preparação ou chamada do gerar_pdf
+            messagebox.showerror("Erro ao Gerar PDF", f"Não foi possível obter ou processar os dados do grupo selecionado.\nErro: {e}", parent=self.root)
 
 
     def gerar_pdf_grupos_selecionados(self):
@@ -884,55 +1153,67 @@ class CalculadoraImobiliaria:
 
         grupos_pdf = []
         nomes_grupos = []
-        indices_invalidos = []
+        ids_falha = []
 
         for item_id in selection:
-            try:
-                index = int(item_id)
+            index = self._get_index_from_iid(item_id)
+            if index is not None:
                 dados = self._preparar_dados_pdf_grupo(index)
                 if dados:
                     grupos_pdf.append(dados)
                     nomes_grupos.append(dados['nome_grupo'])
                 else:
-                    indices_invalidos.append(item_id)
-            except (ValueError, IndexError):
-                indices_invalidos.append(item_id)
+                    # O índice era válido mas a preparação falhou
+                    ids_falha.append(item_id)
+                    print(f"Aviso: Falha ao preparar dados para PDF do índice {index} (IID: {item_id}). Verifique console.")
+            else:
+                ids_falha.append(item_id) # IID inválido ou índice inconsistente
 
         if not grupos_pdf:
-            messagebox.showerror("Erro", "Nenhum grupo válido encontrado na seleção para gerar o PDF.", parent=self.root)
+            messagebox.showerror("Erro", "Nenhum grupo válido encontrado ou preparado na seleção para gerar o PDF.", parent=self.root)
             return
 
-        if indices_invalidos:
-             messagebox.showwarning("Aviso", f"Alguns itens selecionados ({len(indices_invalidos)}) não puderam ser processados e foram ignorados.", parent=self.root)
+        if ids_falha:
+             messagebox.showwarning("Aviso", f"Alguns itens selecionados ({len(ids_falha)}) não puderam ser processados ou encontrados e foram ignorados.", parent=self.root)
 
         # Sugere um nome de arquivo baseado nos grupos
-        nome_sugerido = f"Orcamento_{nomes_grupos[0]}"
-        if len(nomes_grupos) > 1:
-            nome_sugerido += f"_e_{len(nomes_grupos)-1}_outros"
+        nome_sugerido = f"Orcamento_Multiplos"
+        if nomes_grupos:
+             nome_sugerido = f"Orcamento_{nomes_grupos[0]}"
+             if len(nomes_grupos) > 1:
+                 nome_sugerido += f"_e_{len(nomes_grupos)-1}_outros"
         nome_sugerido += ".pdf"
         nome_sugerido = "".join(c if c.isalnum() or c in ['_', '-'] else '_' for c in nome_sugerido) # Limpa caracteres inválidos
-
 
         # Chama gerar_pdf passando a lista de grupos
         self.gerar_pdf(grupos_para_pdf=grupos_pdf, nome_arquivo_sugerido=nome_sugerido)
 
+
     def gerar_pdf(self, grupos_para_pdf: Optional[List[Dict[str, Any]]] = None, nome_arquivo_sugerido: Optional[str] = None):
         """Gera o arquivo PDF. Pode receber dados da calculadora ou de grupos salvos."""
         if not REPORTLAB_AVAILABLE:
-            messagebox.showerror("Dependência Ausente", "A biblioteca ReportLab é necessária para gerar PDFs.\nInstale com: pip install reportlab", parent=self.root)
+            messagebox.showerror("Dependência Ausente", "A biblioteca ReportLab é necessária para gerar PDFs.", parent=self.root)
             return
 
         dados_pdf: List[Dict[str, Any]] = []
         grand_total = 0.0
+        is_calculadora_atual = False
 
-        if grupos_para_pdf:
-            # Usar dados dos grupos fornecidos
+        if grupos_para_pdf is not None: # Verifica se foi passado argumento (pode ser lista vazia)
+            # Usar dados dos grupos fornecidos (já validados e preparados)
             dados_pdf = grupos_para_pdf
-            grand_total = sum(g.get('total', 0.0) for g in dados_pdf)
+            # Calcula o total geral a partir dos totais individuais dos grupos preparados
+            try:
+                 grand_total = sum(float(g.get('total', 0.0)) for g in dados_pdf)
+            except (ValueError, TypeError):
+                 messagebox.showerror("Erro Interno PDF", "Erro ao calcular total geral dos grupos.", parent=self.root)
+                 return
+            # O nome sugerido já deve ter sido tratado antes
         else:
             # Usar dados da calculadora atual
+            is_calculadora_atual = True
             resultado = self._get_dados_calculadora_atual()
-            if resultado is None: # Erro de validação
+            if resultado is None: # Erro de validação nos campos da calculadora
                 return
             itens_calculadora, total_calculadora = resultado
             if not itens_calculadora:
@@ -940,16 +1221,16 @@ class CalculadoraImobiliaria:
                 return
             # Encapsula os dados da calculadora como um único "grupo" para o PDF
             dados_pdf = [{
-                'nome_grupo': "Orçamento Atual", # Nome padrão
+                'nome_grupo': "Orçamento Atual da Calculadora", # Nome padrão
                 'total': total_calculadora,
-                'itens': itens_calculadora
+                'itens': itens_calculadora # Já validado em _get_dados_calculadora_atual
             }]
-            grand_total = total_calculadora
-            nome_arquivo_sugerido = nome_arquivo_sugerido or "Orcamento_Imobiliario.pdf"
+            grand_total = total_calculadora # Já é float
+            nome_arquivo_sugerido = nome_arquivo_sugerido or "Orcamento_Imobiliario_Atual.pdf"
 
 
-        if not dados_pdf:
-             messagebox.showerror("Erro Interno", "Não foi possível preparar os dados para o PDF.", parent=self.root)
+        if not dados_pdf: # Checa se, após toda a lógica, ainda não há dados
+             messagebox.showerror("Erro PDF", "Não há dados válidos para gerar o PDF.", parent=self.root)
              return
 
 
@@ -972,120 +1253,199 @@ class CalculadoraImobiliaria:
             styles = getSampleStyleSheet()
             elements = []
 
-            # Estilo para nome do grupo
-            group_title_style = ParagraphStyle(name='GroupTitle', parent=styles['Heading2'], spaceBefore=10, spaceAfter=5, textColor=COR_PRIMARIA)
-            total_label_style = ParagraphStyle(name='TotalLabel', parent=styles['Normal'], alignment=2, fontName='Helvetica-Bold') # Alinhado à direita e negrito
-            total_value_style = ParagraphStyle(name='TotalValue', parent=styles['Normal'], alignment=2, fontName='Helvetica-Bold') # Alinhado à direita e negrito
+            # --- >>> INÍCIO DAS DEFINIÇÕES DE ESTILO <<< ---
+            # Estilos personalizados
+            styles.add(ParagraphStyle(name='NormalRight', parent=styles['Normal'], alignment=2)) # TA_RIGHT = 2
+            styles.add(ParagraphStyle(name='NormalCenter', parent=styles['Normal'], alignment=1)) # TA_CENTER = 1
+            styles.add(ParagraphStyle(name='CompanyName', parent=styles['h1'], alignment=1, textColor=COR_PRIMARIA))
+            styles.add(ParagraphStyle(name='CompanyInfo', parent=styles['Normal'], alignment=1, fontSize=9, spaceBefore=2, spaceAfter=8))
+            styles.add(ParagraphStyle(name='DocTitle', parent=styles['h2'], alignment=1, spaceAfter=10, textColor=COR_PRIMARIA))
+            styles.add(ParagraphStyle(name='GroupTitle', parent=styles['Heading2'], spaceBefore=12, spaceAfter=6, textColor=COR_PRIMARIA, alignment=0)) # Esquerda
+            styles.add(ParagraphStyle(name='TotalLabel', parent=styles['Normal'], alignment=2, fontName='Helvetica-Bold'))
+            styles.add(ParagraphStyle(name='TotalValue', parent=styles['Normal'], alignment=2, fontName='Helvetica-Bold'))
 
-            # 1. Cabeçalho da Empresa (Apenas na primeira página por padrão)
-            elements.append(Paragraph(self.nome_empresa, styles['h1']))
-            elements.append(Paragraph(f"Telefone: {self.telefone_empresa} | E-mail: {self.email_empresa}", styles['Normal']))
-            elements.append(Paragraph(f"Endereço: {self.endereco_empresa}", styles['Normal']))
-            elements.append(Paragraph(f"Data: {datetime.now().strftime('%d/%m/%Y')}", styles['Normal']))
-            elements.append(Spacer(1, 0.8*cm))
+            # --- >>> CORREÇÃO APLICADA AQUI <<< ---
+            # Definição do estilo TableHeader usando os elementos da tupla FONTE_CABECALHO_TABELA
+            styles.add(ParagraphStyle(name='TableHeader',
+                                      parent=styles['Normal'],
+                                      fontName=FONTE_CABECALHO_TABELA[0], # Pega o nome ('Helvetica-Bold')
+                                      fontSize=FONTE_CABECALHO_TABELA[1], # Pega o tamanho (11)
+                                      alignment=1, # TA_CENTER
+                                      textColor=colors.white))
+            # --- >>> FIM DA CORREÇÃO <<< ---
+
+            styles.add(ParagraphStyle(name='TableCell', parent=styles['Normal'], fontSize=10)) # Estilo base para células
+            styles.add(ParagraphStyle(name='TableCellRight', parent=styles['TableCell'], alignment=2))
+            styles.add(ParagraphStyle(name='NotesHeader', parent=styles['h3'], spaceBefore=15, spaceAfter=5))
+            styles.add(ParagraphStyle(name='NotesText', parent=styles['Normal'], fontSize=9, leftIndent=10, spaceBefore=2))
+            styles.add(ParagraphStyle(name='SignatureLine', parent=styles['Normal'], alignment=1, spaceBefore=40))
+            # --- >>> FIM DAS DEFINIÇÕES DE ESTILO <<< ---
+
+
+            # 1. Cabeçalho da Empresa
+            elements.append(Paragraph(self.nome_empresa, styles['CompanyName']))
+            elements.append(Paragraph(f"Telefone: {self.telefone_empresa} | E-mail: {self.email_empresa}", styles['CompanyInfo']))
+            elements.append(Paragraph(f"Endereço: {self.endereco_empresa}", styles['CompanyInfo']))
+            elements.append(Paragraph(f"Data de Geração: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['CompanyInfo']))
+            #elements.append(Spacer(1, 0.5*cm))
 
             # 2. Título Principal do Documento
-            elements.append(Paragraph("Orçamento de Serviços Imobiliários", styles['h2']))
-            elements.append(Spacer(1, 0.5*cm))
+            elements.append(Paragraph("Orçamento de Serviços Imobiliários", styles['DocTitle']))
+            #elements.append(Spacer(1, 0.3*cm))
 
 
             # --- Loop através dos grupos ---
-            for grupo_data in dados_pdf:
-                nome_grupo = grupo_data.get('nome_grupo', 'Itens')
-                itens_grupo = grupo_data.get('itens', [])
-                total_grupo = grupo_data.get('total', 0.0)
+            for idx_grupo, grupo_data in enumerate(dados_pdf):
+                # Validações básicas do grupo_data (já feito em _preparar_dados...)
+                nome_grupo = grupo_data.get('nome_grupo', f'Grupo {idx_grupo + 1}')
+                itens_grupo = grupo_data.get('itens', []) # Deve ser lista
+                total_grupo = grupo_data.get('total', 0.0) # Deve ser float/int
 
-                # Adiciona o nome do grupo como título (se houver mais de um grupo total)
-                if len(dados_pdf) > 1:
-                     elements.append(Paragraph(f"Grupo: {nome_grupo}", group_title_style))
-                     # elements.append(Spacer(1, 0.2*cm)) # Pequeno espaço após título do grupo
+                # Adiciona espaço antes do próximo grupo (exceto o primeiro)
+                if idx_grupo > 0:
+                     elements.append(Spacer(1, 0.8*cm))
+                     # Considerar PageBreak se a lista de grupos for muito grande?
+                     # elements.append(PageBreak())
 
-                # Tabela de Itens do Grupo
-                if itens_grupo:
-                    data_table = [['Serviço', 'Locação', 'Descrição', 'Valor']]
-                    for item in itens_grupo:
-                        valor_fmt = self._formatar_moeda(item.get('valor', 0.0))
+                # Adiciona o nome do grupo como título (se houver mais de um grupo total ou se for da calculadora)
+                if len(dados_pdf) > 1 or is_calculadora_atual:
+                     elements.append(Paragraph(f"{nome_grupo}", styles['GroupTitle']))
+
+                # --- Tabela de Itens do Grupo (LÓGICA REVISADA) ---
+                data_table = [] # Initialize empty list for table data
+                # Cabeçalhos da Tabela (sempre presentes)
+                # Usa o estilo 'TableHeader' corrigido
+                header_row = [
+                    Paragraph('Serviço', styles['TableHeader']),
+                    Paragraph('Locação', styles['TableHeader']),
+                    Paragraph('Descrição', styles['TableHeader']),
+                    Paragraph('Valor', styles['TableHeader'])
+                ]
+                data_table.append(header_row)
+
+                # Adiciona linhas de itens SOMENTE se itens_grupo não for vazio
+                if isinstance(itens_grupo, list) and itens_grupo:
+                    for item_dict in itens_grupo:
+                        # Valida se item é dict (redundante se _preparar_dados_pdf_grupo fez certo)
+                        if not isinstance(item_dict, dict): continue
+
+                        # Usa .get com default empty strings/0.0 para segurança
+                        servico_txt = str(item_dict.get('servico', ''))
+                        locacao_txt = str(item_dict.get('locacao', ''))
+                        descricao_txt = str(item_dict.get('descricao', ''))
+                        valor_num = item_dict.get('valor', 0.0)
+                        valor_fmt = self._formatar_moeda(valor_num) # Já trata erro de formatação
+
                         data_table.append([
-                            Paragraph(item.get('servico', '-'), styles['Normal']),
-                            Paragraph(item.get('locacao', '-'), styles['Normal']),
-                            Paragraph(item.get('descricao', '-'), styles['Normal']),
-                            Paragraph(valor_fmt, styles['Normal']) # Usar Paragraph para quebrar linha se necessário
+                            Paragraph(servico_txt, styles['TableCell']),
+                            Paragraph(locacao_txt, styles['TableCell']),
+                            Paragraph(descricao_txt, styles['TableCell']),
+                            Paragraph(valor_fmt, styles['TableCellRight'])
                         ])
+                # else: Se itens_grupo for vazio ou não for lista, data_table só terá o header
 
-                    # Adicionar linha de subtotal do grupo (se houver mais de um grupo)
-                    if len(dados_pdf) > 1:
-                         data_table.append(['', '', Paragraph('Subtotal do Grupo:', total_label_style), Paragraph(self._formatar_moeda(total_grupo), total_value_style)])
+                # Adiciona linha de subtotal do grupo
+                # Condições: Mais de um grupo no PDF E este grupo tinha itens
+                add_subtotal_row = len(dados_pdf) > 1 and isinstance(itens_grupo, list) and itens_grupo
+                if add_subtotal_row:
+                    subtotal_row = [
+                         '', '', # Colunas vazias
+                         Paragraph('Subtotal do Grupo:', styles['TotalLabel']),
+                         Paragraph(self._formatar_moeda(total_grupo), styles['TotalValue'])
+                    ]
+                    data_table.append(subtotal_row)
 
-                    # Cria a tabela
-                    table = Table(data_table, colWidths=[3.5*cm, 4.5*cm, 6*cm, 3*cm]) # Ajuste as larguras conforme necessário
+                # --- Cria e Estiliza a Tabela ---
+                # Só cria a tabela se tiver pelo menos o cabeçalho (data_table não estará vazia)
+                largura_util = A4[0] - 3*cm # Largura total da página menos margens
+                col_widths = [largura_util * 0.20, # Serviço
+                              largura_util * 0.25, # Locação
+                              largura_util * 0.35, # Descrição
+                              largura_util * 0.20] # Valor
+                table = Table(data_table, colWidths=col_widths)
 
-                    # Estilo da Tabela
-                    table_style = TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), COR_PRIMARIA), # Cabeçalho
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 0), (-1, 0), 11),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                        ('TOPPADDING', (0, 0), (-1, 0), 8),
-
-                        ('BACKGROUND', (0, 1), (-1, -1), colors.white), # Corpo
-                        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey), # Grid
-                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), # Alinhamento vertical
-                        ('ALIGN', (3, 1), (3, -1), 'RIGHT'), # Coluna Valor alinhada à direita
-
-                        # Estilo para linha de subtotal (se existir)
-                        ('BACKGROUND', (0, -1), (-1, -1), COR_SECUNDARIA),
-                        ('ALIGN', (2, -1), (2, -1), 'RIGHT'), # Label 'Subtotal'
-                        ('ALIGN', (3, -1), (3, -1), 'RIGHT'), # Valor do subtotal
-                        ('FONTNAME', (2, -1), (3, -1), 'Helvetica-Bold'),
-                        ('BOTTOMPADDING', (0, -1), (-1, -1), 6),
-                        ('TOPPADDING', (0, -1), (-1, -1), 6),
-                    ])
-                    # Remove a grid da linha de subtotal se ela existir e for a última
-                    if len(dados_pdf) > 1:
-                        table_style.add('GRID', (0, -1), (-1,-1), 0.5, colors.grey) # Mantem grid na linha total
-                        # table_style.add('LINEABOVE', (0,-1), (-1,-1), 1, colors.black) # Linha acima do subtotal
-
-
-                    table.setStyle(table_style)
-                    elements.append(table)
-                    elements.append(Spacer(1, 0.5*cm))
-                else:
-                     # Caso um grupo esteja vazio (improvável, mas seguro)
-                     if len(dados_pdf) > 1: # Só mostra se for um grupo nomeado
-                         elements.append(Paragraph(f"Grupo: {nome_grupo} (Vazio)", group_title_style))
-                         elements.append(Spacer(1, 0.3*cm))
-
-
-            # --- Grand Total (se houver mais de um grupo) ---
-            if len(dados_pdf) > 1:
-                elements.append(Spacer(1, 0.5*cm))
-                total_data = [['', '', Paragraph('VALOR TOTAL GERAL:', total_label_style), Paragraph(self._formatar_moeda(grand_total), total_value_style)]]
-                total_table = Table(total_data, colWidths=[3.5*cm, 4.5*cm, 6*cm, 3*cm])
-                total_table.setStyle(TableStyle([
-                    ('ALIGN', (2, 0), (2, 0), 'RIGHT'),
-                    ('ALIGN', (3, 0), (3, 0), 'RIGHT'),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('FONTNAME', (2, 0), (3, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (2, 0), (3, 0), 12),
+                # Estilo Base da Tabela (Comandos para TableStyle já estavam usando o índice da tupla corretamente)
+                table_style_commands = [
+                    # Header Style
                     ('BACKGROUND', (0, 0), (-1, 0), COR_PRIMARIA),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                     ('TOPPADDING', (0, 0), (-1, -1), 8),
-                     ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-                ]))
-                elements.append(total_table)
-                elements.append(Spacer(1, 1*cm))
+                    ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                    ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+                    ('FONTNAME', (0, 0), (-1, 0), FONTE_CABECALHO_TABELA[0]), # Nome da fonte
+                    ('FONTSIZE', (0, 0), (-1, 0), FONTE_CABECALHO_TABELA[1]), # Tamanho da fonte
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                    ('TOPPADDING', (0, 0), (-1, 0), 8),
+                    # Grid only for header initially
+                    ('GRID', (0, 0), (-1, 0), 0.5, colors.grey),
+                ]
+
+                # Estilos do Corpo (se houver linhas de dados, i.e. num_rows > 1)
+                if len(data_table) > 1:
+                    # Define a última linha de dados (pode ser a subtotal ou a última de itens)
+                    last_data_row_index = len(data_table) - 1
+
+                    table_style_commands.extend([
+                        # Body Background and Alignment
+                        ('BACKGROUND', (0, 1), (-1, last_data_row_index), colors.white),
+                        ('VALIGN', (0, 1), (-1, last_data_row_index), 'TOP'),
+                        ('ALIGN', (3, 1), (3, last_data_row_index), 'RIGHT'), # Align Valor column
+                        ('BOTTOMPADDING', (0, 1), (-1, last_data_row_index), 5),
+                        ('TOPPADDING', (0, 1), (-1, last_data_row_index), 5),
+                        # Grid for all data rows (including subtotal if present)
+                        ('GRID', (0, 1), (-1, last_data_row_index), 0.5, colors.grey),
+                    ])
+
+                    # Estilo Específico para linha de subtotal (se foi adicionada)
+                    if add_subtotal_row:
+                        subtotal_row_index = last_data_row_index # É a última linha
+                        table_style_commands.extend([
+                            ('BACKGROUND', (0, subtotal_row_index), (-1, subtotal_row_index), COR_SECUNDARIA),
+                            ('ALIGN', (2, subtotal_row_index), (2, subtotal_row_index), 'RIGHT'), # Label 'Subtotal'
+                            ('ALIGN', (3, subtotal_row_index), (3, subtotal_row_index), 'RIGHT'), # Valor do subtotal
+                            ('VALIGN', (0, subtotal_row_index), (-1, subtotal_row_index), 'MIDDLE'),
+                            ('FONTNAME', (2, subtotal_row_index), (3, subtotal_row_index), 'Helvetica-Bold'),
+                            ('TEXTCOLOR', (2, subtotal_row_index), (3, subtotal_row_index), COR_TEXTO), # Garante cor do texto
+                            ('BOTTOMPADDING', (0, subtotal_row_index), (-1, subtotal_row_index), 6),
+                            ('TOPPADDING', (0, subtotal_row_index), (-1, subtotal_row_index), 6),
+                        ])
+
+                # Aplica o estilo compilado
+                table.setStyle(TableStyle(table_style_commands))
+                elements.append(table)
+                # Fim da lógica da tabela do grupo
+
+
+            # --- Grand Total (mostra sempre) ---
+            elements.append(Spacer(1, 0.5*cm))
+            # Tabela para o total geral
+            total_geral_data = [[
+                Paragraph('VALOR TOTAL GERAL:', styles['TotalLabel']),
+                Paragraph(self._formatar_moeda(grand_total), styles['TotalValue'])
+            ]]
+            total_geral_table = Table(total_geral_data, colWidths=[col_widths[0] + col_widths[1] + col_widths[2], col_widths[3]])
+            total_geral_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 12),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.white),
+                ('BACKGROUND', (0, 0), (-1, -1), COR_PRIMARIA),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ]))
+            elements.append(total_geral_table)
+            #elements.append(Spacer(1, 0.5*cm))
 
 
             # --- Rodapé / Observações ---
-            elements.append(Paragraph("Observações:", styles['h3']))
-            elements.append(Paragraph("1. Valores sujeitos a alteração sem aviso prévio.", styles['Normal']))
-            elements.append(Paragraph("2. Validade desta proposta: 30 dias.", styles['Normal']))
-            elements.append(Paragraph("3. Condições de pagamento a combinar.", styles['Normal']))
-            elements.append(Spacer(1, 2*cm))
-            elements.append(Paragraph("_______________________________", styles['Normal']))
-            elements.append(Paragraph(self.nome_empresa, styles['Normal']))
+            elements.append(Paragraph("Observações:", styles['NotesHeader']))
+            elements.append(Paragraph("Valores sujeitos a alteração sem aviso prévio.", styles['NotesText']))
+            elements.append(Paragraph("Validade desta proposta: 30 dias (salvo indicação contrária).", styles['NotesText']))
+            elements.append(Paragraph("Condições de pagamento a combinar.", styles['NotesText']))
+
+            # Assinatura
+            elements.append(Paragraph("_______________________________", styles['SignatureLine']))
+            elements.append(Paragraph(self.nome_empresa, styles['NormalCenter']))
 
 
             # --- Construir o PDF ---
@@ -1098,20 +1458,25 @@ class CalculadoraImobiliaria:
         except PermissionError:
              messagebox.showerror("Erro de Permissão", f"Não foi possível salvar o arquivo em:\n{file_path}\n\nVerifique se o arquivo já está aberto ou se você tem permissão para escrever neste local.", parent=self.root)
         except Exception as e:
-            messagebox.showerror("Erro ao Gerar PDF", f"Ocorreu um erro inesperado:\n{str(e)}", parent=self.root)
+            messagebox.showerror("Erro ao Gerar PDF", f"Ocorreu um erro inesperado ao gerar o PDF:\n{str(e)}", parent=self.root)
             import traceback
-            print(traceback.format_exc()) # Log completo no console
+            print("--- ERRO DETALHADO NA GERAÇÃO DO PDF ---")
+            traceback.print_exc() # Log completo no console
+            print("--- FIM DO ERRO DETALHADO ---")
 
 
     def abrir_arquivo(self, file_path: str):
         """Abre um arquivo usando o aplicativo padrão do sistema."""
         try:
             if platform.system() == 'Windows':
-                os.startfile(file_path)
+                # Tenta usar startfile que é mais robusto no Windows
+                os.startfile(os.path.realpath(file_path))
             elif platform.system() == 'Darwin':  # macOS
-                subprocess.call(('open', file_path))
+                subprocess.run(['open', file_path], check=True)
             else:  # Linux e outros
-                subprocess.call(('xdg-open', file_path))
+                subprocess.run(['xdg-open', file_path], check=True)
+        except FileNotFoundError:
+             messagebox.showwarning("Erro ao Abrir", f"Não foi possível encontrar o aplicativo padrão ou o próprio arquivo PDF:\n{file_path}", parent=self.root)
         except Exception as e:
             messagebox.showwarning("Erro ao Abrir", f"Não foi possível abrir o arquivo automaticamente:\n{file_path}\nErro: {e}", parent=self.root)
 
@@ -1119,48 +1484,47 @@ class CalculadoraImobiliaria:
     # --- Funções de Callback para Scroll ---
     def _on_frame_configure(self, event=None):
         """Atualiza a região de rolagem do canvas quando o frame interno muda de tamanho."""
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        # Usar after_idle pode ser mais seguro que um tempo fixo
+        self.root.after_idle(lambda: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
 
     def _on_canvas_configure(self, event=None):
         """Redimensiona o frame interno para preencher a largura do canvas."""
-        canvas_width = self.canvas.winfo_width() # Usar winfo_width que é mais confiável aqui
-        self.canvas.itemconfig(self.canvas_window, width=canvas_width)
-        # Chamar _on_frame_configure pode ser redundante aqui se o tamanho do frame interno não mudou
-        # self._on_frame_configure()
-
+        canvas_width = self.canvas.winfo_width()
+        if canvas_width > 0: # Evita definir largura 0 durante inicialização
+            self.canvas.itemconfig(self.canvas_window, width=canvas_width)
 
     def _on_mousewheel(self, event):
         """Permite rolar a área de entradas com a roda do mouse."""
-        if self.canvas.yview() == (0.0, 1.0) and event.delta > 0: # Impede scroll para cima quando já está no topo
-             if platform.system() == 'Windows' and self.canvas.yview()[0] == 0.0: return
-             if platform.system() != 'Windows' and event.delta > 0 and self.canvas.yview()[0] == 0.0: return
+        # Verifica se o widget sob o mouse está DENTRO da área rolável
+        widget_sob_mouse = self.root.winfo_containing(event.x_root, event.y_root)
+        # Verifica se o widget é o canvas ou um filho do frame interno
+        parent_check = widget_sob_mouse
+        is_child_of_canvas_frame = False
+        while parent_check is not None:
+             if parent_check == self.frame_interno:
+                  is_child_of_canvas_frame = True
+                  break
+             parent_check = parent_check.master # Sobe na hierarquia
 
+        if widget_sob_mouse == self.canvas or is_child_of_canvas_frame:
+            delta = 0
+            if platform.system() == 'Windows':
+                delta = -1 * int(event.delta / 120)
+            elif platform.system() == 'Darwin':
+                 delta = -1 * int(event.delta)
+            else: # Linux
+                if event.num == 4: delta = -1
+                elif event.num == 5: delta = 1
 
-        if platform.system() == 'Windows':
-            self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        elif platform.system() == 'Darwin':  # macOS
-             # A sensibilidade pode precisar de ajuste no macOS
-             self.canvas.yview_scroll(int(-1 * event.delta), "units")
-        else:  # Linux (event.num 4 para cima, 5 para baixo)
-            if event.num == 4:
-                self.canvas.yview_scroll(-1, "units")
-            elif event.num == 5:
-                self.canvas.yview_scroll(1, "units")
+            if delta != 0: # Só rola se houver delta
+                 self.canvas.yview_scroll(delta, "units")
 
 
 # --- Inicialização ---
 def main():
     root = tk.Tk()
-    # Tenta definir um ícone (opcional, requer arquivo .ico ou .png dependendo do SO)
-    # try:
-    #     # Para Windows:
-    #     # root.iconbitmap('path/to/your/icon.ico')
-    #     # Para Linux/macOS (usando PhotoImage):
-    #     # icon = tk.PhotoImage(file='path/to/your/icon.png')
-    #     # root.iconphoto(True, icon)
-    #     pass
-    # except Exception as e:
-    #     print(f"Erro ao definir ícone: {e}")
+    # Tenta definir um ícone (opcional)
+    # ... (código do ícone) ...
 
     app = CalculadoraImobiliaria(root)
     root.mainloop()
@@ -1168,11 +1532,13 @@ def main():
 if __name__ == "__main__":
     # Verifica se o ReportLab está disponível e avisa se não estiver
     if not REPORTLAB_AVAILABLE:
-        root_check = tk.Tk()
-        root_check.withdraw() # Esconde a janela principal temporária
+        temp_root = tk.Tk()
+        temp_root.withdraw()
         messagebox.showwarning("Dependência Ausente",
-                               "A biblioteca 'ReportLab' não foi encontrada.\nA funcionalidade de gerar PDF estará desativada.\n\nPara habilitá-la, instale usando:\npip install reportlab",
-                               parent=None) # Mostra antes da janela principal
-        root_check.destroy()
+                               "A biblioteca 'ReportLab' não foi encontrada.\nA funcionalidade de gerar PDF estará desativada.\n\nPara habilitá-la, feche a aplicação e instale usando o comando no terminal:\npython -m pip install reportlab",
+                               parent=None)
+        temp_root.destroy()
+        # Decide se quer continuar sem PDF ou sair
+        # return # Descomente para sair se ReportLab for essencial
 
     main()
