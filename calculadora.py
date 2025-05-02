@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
@@ -17,6 +18,16 @@ try:
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
+
+# --- TENTATIVA DE IMPORTAR PyMuPDF (fitz) ---
+# Necessário para a funcionalidade de pré-visualização de PDF
+# Instalar com: pip install pymupdf
+try:
+    import fitz  # PyMuPDF
+    PYMUPDF_AVAILABLE = True
+except ImportError:
+    PYMUPDF_AVAILABLE = False
+
 
 # --- Constantes ---
 COR_PRIMARIA = "#1E3D59"
@@ -49,9 +60,15 @@ class CalculadoraImobiliaria:
         self.entries: List[Dict[str, Any]] = []
         self.servicos_salvos: List[Dict[str, Any]] = []
         self.filtro_servicos_var = tk.StringVar()
-        # self.filtro_data_inicio_var = tk.StringVar() # REMOVIDO
-        # self.filtro_data_fim_var = tk.StringVar()    # REMOVIDO
         self.filtro_data_unica_var = tk.StringVar() # ADICIONADO
+
+        # Estado da Aba de PDF
+        self.pdf_preview_path = None
+        self.pdf_preview_doc = None
+        self.pdf_preview_page_num = 0
+        self.pdf_preview_image_label = None # Label para exibir a imagem da página
+        self.pdf_preview_canvas = None # Canvas para a imagem (caso precise de scroll)
+        self.pdf_page_display = None # Referência para a imagem Tkinter
 
         self.carregar_servicos_salvos()
         self.configurar_estilo()
@@ -121,8 +138,15 @@ class CalculadoraImobiliaria:
         self.tab_servicos_salvos = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(self.tab_servicos_salvos, text=" Serviços Salvos 💾 ")
 
+        # --- INÍCIO: Adição da Nova Aba ---
+        # Aba 3: Visualizar PDF
+        self.tab_pdf_preview = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(self.tab_pdf_preview, text=" Visualizar PDF 📄 ")
+        # --- FIM: Adição da Nova Aba ---
+
         self._criar_aba_calculadora()
         self._criar_aba_servicos_salvos()
+        self._criar_aba_pdf_preview() # Chama a função para criar o conteúdo da nova aba
         self._criar_rodape()
 
     def _criar_cabecalho(self, frame_pai: ttk.Frame, titulo: str, icone: str):
@@ -285,20 +309,6 @@ class CalculadoraImobiliaria:
         entry_data_unica.pack(side=tk.LEFT, fill=tk.X, expand=True)
         # Atualize o trace para chamar a mesma função de filtro
         self.filtro_data_unica_var.trace_add("write", self._filtrar_servicos_salvos)
-
-        # REMOVA ou comente as linhas dos filtros de data_inicio e data_fim:
-        # frame_filtro_data = ttk.Frame(frame_filtros_geral)
-        # frame_filtro_data.pack(fill=tk.X, pady=(5, 0))
-        # frame_filtro_data.columnconfigure(1, weight=1)
-        # frame_filtro_data.columnconfigure(3, weight=1)
-        # ttk.Label(frame_filtro_data, text="Data Início (DD/MM/AAAA):", font=('Segoe UI', 10)).grid(row=0, column=0, padx=(0, 5), sticky=tk.W)
-        # entry_data_inicio = ttk.Entry(frame_filtro_data, textvariable=self.filtro_data_inicio_var, font=('Segoe UI', 10), width=12)
-        # entry_data_inicio.grid(row=0, column=1, padx=(0, 10), sticky=tk.EW)
-        # self.filtro_data_inicio_var.trace_add("write", self._filtrar_servicos_salvos) # Filtrar ao digitar
-        # ttk.Label(frame_filtro_data, text="Data Fim (DD/MM/AAAA):", font=('Segoe UI', 10)).grid(row=0, column=2, padx=(10, 5), sticky=tk.W)
-        # entry_data_fim = ttk.Entry(frame_filtro_data, textvariable=self.filtro_data_fim_var, font=('Segoe UI', 10), width=12)
-        # entry_data_fim.grid(row=0, column=3, padx=(0, 5), sticky=tk.EW)
-        # self.filtro_data_fim_var.trace_add("write", self._filtrar_servicos_salvos) # Filtrar ao digitar
         # --- FIM DA MODIFICAÇÃO DO FILTRO DE DATA ---
 
 
@@ -379,6 +389,233 @@ class CalculadoraImobiliaria:
                                                      command=self.carregar_grupo_na_calculadora,
                                                      width=25)
         self.btn_carregar_na_calculadora.pack(pady=10)
+
+
+    # --- INÍCIO: Criação da Aba de Visualização/Edição de PDF ---
+    def _criar_aba_pdf_preview(self):
+        """Cria os widgets da aba Visualizar PDF (Placeholders)."""
+        self._criar_cabecalho(self.tab_pdf_preview, "Visualizador de PDF", "🔍")
+
+        # Frame principal da aba
+        frame_conteudo_pdf = ttk.Frame(self.tab_pdf_preview)
+        frame_conteudo_pdf.pack(fill=tk.BOTH, expand=True)
+
+        # --- Painel de Controle (Esquerda ou Topo) ---
+        frame_controle_pdf = ttk.Frame(frame_conteudo_pdf, width=250) # Largura fixa para controles
+        frame_controle_pdf.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10), pady=5)
+        frame_controle_pdf.pack_propagate(False)
+
+        ttk.Label(frame_controle_pdf, text="Controles do PDF", font=('Segoe UI', 11, 'bold')).pack(pady=(0, 10), anchor=tk.W)
+
+        # Botão para carregar PDF
+        btn_carregar = ttk.Button(frame_controle_pdf, text="📂 Carregar PDF...", command=self._carregar_pdf_para_preview)
+        btn_carregar.pack(fill=tk.X, pady=4)
+
+        # Aviso sobre PyMuPDF
+        if not PYMUPDF_AVAILABLE:
+            lbl_aviso = tk.Label(frame_controle_pdf,
+                                 text="Pré-visualização requer PyMuPDF.\nInstale com: pip install pymupdf",
+                                 font=('Segoe UI', 8), fg='red', bg=COR_SECUNDARIA, justify=tk.LEFT)
+            lbl_aviso.pack(fill=tk.X, pady=5)
+            # Desabilitar botões que dependem do PyMuPDF
+            btn_carregar.config(state=tk.DISABLED)
+
+
+        # Placeholder para informações do arquivo
+        self.lbl_pdf_info = ttk.Label(frame_controle_pdf, text="Nenhum PDF carregado.", wraplength=230, justify=tk.LEFT)
+        self.lbl_pdf_info.pack(pady=10, anchor=tk.W)
+
+        # Placeholder para controles de página (dependem de PyMuPDF)
+        frame_paginacao = ttk.Frame(frame_controle_pdf)
+        frame_paginacao.pack(fill=tk.X, pady=5)
+
+        self.btn_prev_page = ttk.Button(frame_paginacao, text="◀ Anterior", command=self._pagina_anterior_pdf, state=tk.DISABLED)
+        self.btn_prev_page.pack(side=tk.LEFT, expand=True, padx=2)
+
+        self.lbl_page_num = ttk.Label(frame_paginacao, text="Página: - / -")
+        self.lbl_page_num.pack(side=tk.LEFT, padx=5)
+
+        self.btn_next_page = ttk.Button(frame_paginacao, text="Próxima ▶", command=self._proxima_pagina_pdf, state=tk.DISABLED)
+        self.btn_next_page.pack(side=tk.LEFT, expand=True, padx=2)
+
+        ttk.Separator(frame_controle_pdf, orient='horizontal').pack(fill='x', pady=15)
+
+        ttk.Label(frame_controle_pdf, text="Edição (Placeholder)", font=('Segoe UI', 11, 'bold')).pack(pady=(0, 10), anchor=tk.W)
+
+        # Botão placeholder para "Editar Dados"
+        btn_editar_dados = ttk.Button(frame_controle_pdf, text="✏️ Editar Dados Originais", command=self._editar_dados_pdf_placeholder)
+        btn_editar_dados.pack(fill=tk.X, pady=4)
+
+        # Explicação sobre a edição
+        lbl_edit_info = tk.Label(frame_controle_pdf,
+                                 text="Nota: A edição direta de PDF é complexa. "
+                                      "Este botão poderia carregar os dados originais "
+                                      "na aba Calculadora para modificação e "
+                                      "regeneração do PDF.",
+                                 font=('Segoe UI', 8), wraplength=230, justify=tk.LEFT, bg=COR_SECUNDARIA)
+        lbl_edit_info.pack(fill=tk.X, pady=5)
+
+        # --- Painel de Visualização (Direita) ---
+        frame_visualizacao = ttk.Frame(frame_conteudo_pdf, relief=tk.SUNKEN, borderwidth=1)
+        frame_visualizacao.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        # Canvas para exibir a imagem da página do PDF (permitirá scroll no futuro, se necessário)
+        self.pdf_preview_canvas = tk.Canvas(frame_visualizacao, bg="gray", bd=0, highlightthickness=0)
+        self.pdf_preview_canvas.pack(fill=tk.BOTH, expand=True)
+
+        # Adicionar um Label dentro do Canvas para conter a imagem
+        # O tamanho inicial é irrelevante, será ajustado ao carregar a imagem
+        self.pdf_preview_image_label = ttk.Label(self.pdf_preview_canvas, text="Área de Pré-visualização do PDF", background='lightgrey')
+        self.pdf_preview_canvas.create_window(0, 0, window=self.pdf_preview_image_label, anchor='nw')
+
+        # Se precisar de scrollbars no canvas (para zoom, por exemplo):
+        # vsb = ttk.Scrollbar(frame_visualizacao, orient="vertical", command=self.pdf_preview_canvas.yview)
+        # hsb = ttk.Scrollbar(frame_visualizacao, orient="horizontal", command=self.pdf_preview_canvas.xview)
+        # self.pdf_preview_canvas.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        # vsb.pack(side="right", fill="y")
+        # hsb.pack(side="bottom", fill="x")
+        # self.pdf_preview_canvas.bind("<Configure>", self._configurar_scroll_pdf) # Função para configurar scrollregion
+
+        # Mensagem inicial se PyMuPDF não estiver disponível
+        if not PYMUPDF_AVAILABLE:
+             self.pdf_preview_image_label.config(text="Pré-visualização indisponível.\nInstale PyMuPDF (fitz).", font=('Segoe UI', 12, 'bold'), foreground='darkred')
+
+    def _configurar_scroll_pdf(self, event=None):
+         """Atualiza a região de scroll do canvas de PDF."""
+         # Necessário se usar scrollbars
+         self.pdf_preview_canvas.configure(scrollregion=self.pdf_preview_canvas.bbox("all"))
+
+    def _carregar_pdf_para_preview(self):
+        """Abre diálogo para selecionar um PDF e tenta carregá-lo para preview."""
+        if not PYMUPDF_AVAILABLE:
+            messagebox.showerror("Dependência Ausente", "PyMuPDF (fitz) é necessário para visualizar PDFs.", parent=self.root)
+            return
+
+        file_path = filedialog.askopenfilename(
+            title="Selecionar PDF para Visualizar",
+            filetypes=[("Arquivos PDF", "*.pdf"), ("Todos os arquivos", "*.*")],
+            parent=self.root
+        )
+
+        if not file_path:
+            return # Usuário cancelou
+
+        try:
+            # Fechar documento anterior, se houver
+            if self.pdf_preview_doc:
+                self.pdf_preview_doc.close()
+
+            self.pdf_preview_doc = fitz.open(file_path)
+            self.pdf_preview_path = file_path
+            self.pdf_preview_page_num = 0 # Começa na primeira página
+
+            # Atualizar informações
+            num_pages = len(self.pdf_preview_doc)
+            filename = os.path.basename(file_path)
+            self.lbl_pdf_info.config(text=f"Arquivo: {filename}\nPáginas: {num_pages}")
+
+            # Habilitar/desabilitar botões de paginação
+            self.btn_prev_page.config(state=tk.DISABLED)
+            self.btn_next_page.config(state=tk.NORMAL if num_pages > 1 else tk.DISABLED)
+
+            # Exibir a primeira página
+            self._exibir_pagina_pdf()
+
+        except Exception as e:
+            messagebox.showerror("Erro ao Abrir PDF", f"Não foi possível carregar ou processar o arquivo PDF:\n{file_path}\n\nErro: {e}", parent=self.root)
+            # Limpar estado
+            if self.pdf_preview_doc:
+                self.pdf_preview_doc.close()
+            self.pdf_preview_doc = None
+            self.pdf_preview_path = None
+            self.pdf_preview_page_num = 0
+            self.lbl_pdf_info.config(text="Falha ao carregar PDF.")
+            self.lbl_page_num.config(text="Página: - / -")
+            self.pdf_preview_image_label.config(image='', text='Falha ao carregar PDF.') # Limpa imagem
+            self.btn_prev_page.config(state=tk.DISABLED)
+            self.btn_next_page.config(state=tk.DISABLED)
+
+
+    def _exibir_pagina_pdf(self):
+        """Renderiza e exibe a página atual do PDF."""
+        if not self.pdf_preview_doc or not PYMUPDF_AVAILABLE:
+            return
+
+        try:
+            page = self.pdf_preview_doc.load_page(self.pdf_preview_page_num)
+
+            # Definir zoom (ajustar conforme necessário, afeta qualidade e tamanho)
+            zoom_matrix = fitz.Matrix(1.5, 1.5) # Exemplo: Zoom de 150%
+
+            # Renderizar página como imagem (pixmap)
+            pix = page.get_pixmap(matrix=zoom_matrix, alpha=False)
+
+            # Converter para formato que Tkinter entende (PNG)
+            img_data = pix.tobytes("ppm") # Usar PPM que tk.PhotoImage suporta nativamente
+
+            # Criar PhotoImage e manter referência
+            self.pdf_page_display = tk.PhotoImage(data=img_data)
+
+            # Exibir a imagem no Label dentro do Canvas
+            self.pdf_preview_image_label.config(image=self.pdf_page_display, text="") # Exibe imagem
+            # Ajustar o tamanho do Label para o tamanho da imagem
+            self.pdf_preview_image_label.config(width=self.pdf_page_display.width(), height=self.pdf_page_display.height())
+
+
+            # Atualizar label do número da página
+            num_pages = len(self.pdf_preview_doc)
+            self.lbl_page_num.config(text=f"Página: {self.pdf_preview_page_num + 1} / {num_pages}")
+
+            # Habilitar/desabilitar botões de paginação
+            self.btn_prev_page.config(state=tk.NORMAL if self.pdf_preview_page_num > 0 else tk.DISABLED)
+            self.btn_next_page.config(state=tk.NORMAL if self.pdf_preview_page_num < num_pages - 1 else tk.DISABLED)
+
+            # Atualizar scroll region se estiver usando scrollbars
+            self.root.after_idle(self._configurar_scroll_pdf)
+
+
+        except Exception as e:
+            messagebox.showerror("Erro ao Renderizar Página", f"Não foi possível renderizar a página {self.pdf_preview_page_num + 1}.\n\nErro: {e}", parent=self.root)
+            self.pdf_preview_image_label.config(image='', text=f"Erro na pág. {self.pdf_preview_page_num + 1}") # Limpa imagem
+
+
+    def _pagina_anterior_pdf(self):
+        """Vai para a página anterior do PDF."""
+        if self.pdf_preview_doc and self.pdf_preview_page_num > 0:
+            self.pdf_preview_page_num -= 1
+            self._exibir_pagina_pdf()
+
+    def _proxima_pagina_pdf(self):
+        """Vai para a próxima página do PDF."""
+        if self.pdf_preview_doc and self.pdf_preview_page_num < len(self.pdf_preview_doc) - 1:
+            self.pdf_preview_page_num += 1
+            self._exibir_pagina_pdf()
+
+    def _editar_dados_pdf_placeholder(self):
+        """Função placeholder para a ação de editar dados do PDF."""
+        if not self.pdf_preview_path:
+             messagebox.showinfo("Nenhum PDF Carregado", "Carregue um arquivo PDF primeiro.", parent=self.root)
+             return
+
+        # --- Lógica Placeholder ---
+        # Idealmente, aqui você tentaria encontrar os dados originais que geraram
+        # este PDF (talvez buscando um grupo salvo com nome similar ou metadados no PDF).
+        # Se encontrados, carregaria na aba Calculadora.
+
+        messagebox.showinfo("Funcionalidade Placeholder",
+                            "Esta é uma função placeholder.\n\n"
+                            "A edição direta do PDF não está implementada devido à sua complexidade.\n\n"
+                            "Para editar, idealmente, carregue os dados originais na aba 'Calculadora', "
+                            "faça as alterações e gere um novo PDF.",
+                            parent=self.root)
+
+        # Exemplo de como poderia tentar carregar um grupo relacionado (requer lógica adicional)
+        # nome_arquivo = os.path.basename(self.pdf_preview_path)
+        # nome_grupo_potencial = nome_arquivo.replace("Orcamento_", "").replace(".pdf", "").replace("_", " ")
+        # # ... (lógica para encontrar o grupo 'nome_grupo_potencial' em self.servicos_salvos) ...
+        # # ... (se encontrar, chamar self.carregar_grupo_na_calculadora(indice_do_grupo)) ...
+
+    # --- FIM: Criação da Aba de Visualização/Edição de PDF ---
 
 
     # --- Lógica de Negócio e Eventos ---
@@ -1287,16 +1524,13 @@ class CalculadoraImobiliaria:
             styles.add(ParagraphStyle(name='TotalLabel', parent=styles['Normal'], alignment=2, fontName='Helvetica-Bold'))
             styles.add(ParagraphStyle(name='TotalValue', parent=styles['Normal'], alignment=2, fontName='Helvetica-Bold'))
 
-            # --- >>> CORREÇÃO APLICADA AQUI <<< ---
             # Definição do estilo TableHeader usando os elementos da tupla FONTE_CABECALHO_TABELA
             styles.add(ParagraphStyle(name='TableHeader',
-                                      parent=styles['Normal'],
-                                      fontName=FONTE_CABECALHO_TABELA[0], # Pega o nome ('Helvetica-Bold')
-                                      fontSize=FONTE_CABECALHO_TABELA[1], # Pega o tamanho (11)
-                                      alignment=1, # TA_CENTER
-                                      textColor=colors.white))
-            # --- >>> FIM DA CORREÇÃO <<< ---
-
+                              parent=styles['Normal'],
+                              fontName=FONTE_CABECALHO_TABELA[0], # Correto
+                              fontSize=FONTE_CABECALHO_TABELA[1], # Correto
+                              alignment=1,
+                              textColor=colors.white))
             styles.add(ParagraphStyle(name='TableCell', parent=styles['Normal'], fontSize=10)) # Estilo base para células
             styles.add(ParagraphStyle(name='TableCellRight', parent=styles['TableCell'], alignment=2))
             styles.add(ParagraphStyle(name='NotesHeader', parent=styles['h3'], spaceBefore=15, spaceAfter=5))
@@ -1478,6 +1712,26 @@ class CalculadoraImobiliaria:
             if messagebox.askyesno("PDF Gerado", f"PDF '{os.path.basename(file_path)}' gerado com sucesso!\nDeseja abri-lo agora?", parent=self.root):
                 self.abrir_arquivo(file_path)
 
+            # --- Tentar carregar o PDF recém-criado na aba de preview ---
+            if PYMUPDF_AVAILABLE:
+                 if self.pdf_preview_doc:
+                      self.pdf_preview_doc.close() # Fecha o anterior
+                 try:
+                      self.pdf_preview_doc = fitz.open(file_path)
+                      self.pdf_preview_path = file_path
+                      self.pdf_preview_page_num = 0
+                      num_pages = len(self.pdf_preview_doc)
+                      filename = os.path.basename(file_path)
+                      self.lbl_pdf_info.config(text=f"Arquivo: {filename}\nPáginas: {num_pages}")
+                      self.btn_prev_page.config(state=tk.DISABLED)
+                      self.btn_next_page.config(state=tk.NORMAL if num_pages > 1 else tk.DISABLED)
+                      self._exibir_pagina_pdf()
+                      # Opcional: Mudar para a aba de preview automaticamente
+                      # self.notebook.select(self.tab_pdf_preview)
+                 except Exception as load_err:
+                      print(f"Aviso: Não foi possível carregar automaticamente o PDF gerado para preview: {load_err}")
+
+
         except PermissionError:
              messagebox.showerror("Erro de Permissão", f"Não foi possível salvar o arquivo em:\n{file_path}\n\nVerifique se o arquivo já está aberto ou se você tem permissão para escrever neste local.", parent=self.root)
         except Exception as e:
@@ -1491,17 +1745,19 @@ class CalculadoraImobiliaria:
     def abrir_arquivo(self, file_path: str):
         """Abre um arquivo usando o aplicativo padrão do sistema."""
         try:
+            # Garante que o caminho é absoluto e normalizado
+            abs_path = os.path.abspath(file_path)
             if platform.system() == 'Windows':
                 # Tenta usar startfile que é mais robusto no Windows
-                os.startfile(os.path.realpath(file_path))
+                os.startfile(abs_path)
             elif platform.system() == 'Darwin':  # macOS
-                subprocess.run(['open', file_path], check=True)
+                subprocess.run(['open', abs_path], check=True)
             else:  # Linux e outros
-                subprocess.run(['xdg-open', file_path], check=True)
+                subprocess.run(['xdg-open', abs_path], check=True)
         except FileNotFoundError:
-             messagebox.showwarning("Erro ao Abrir", f"Não foi possível encontrar o aplicativo padrão ou o próprio arquivo PDF:\n{file_path}", parent=self.root)
+             messagebox.showwarning("Erro ao Abrir", f"Não foi possível encontrar o aplicativo padrão ou o próprio arquivo PDF:\n{abs_path}", parent=self.root)
         except Exception as e:
-            messagebox.showwarning("Erro ao Abrir", f"Não foi possível abrir o arquivo automaticamente:\n{file_path}\nErro: {e}", parent=self.root)
+            messagebox.showwarning("Erro ao Abrir", f"Não foi possível abrir o arquivo automaticamente:\n{abs_path}\nErro: {e}", parent=self.root)
 
 
     # --- Funções de Callback para Scroll ---
@@ -1520,16 +1776,28 @@ class CalculadoraImobiliaria:
         """Permite rolar a área de entradas com a roda do mouse."""
         # Verifica se o widget sob o mouse está DENTRO da área rolável
         widget_sob_mouse = self.root.winfo_containing(event.x_root, event.y_root)
-        # Verifica se o widget é o canvas ou um filho do frame interno
+
+        # --- Verifica se o scroll é para o canvas da calculadora OU para o canvas do PDF ---
+        target_canvas = None
+        target_frame = None
+
         parent_check = widget_sob_mouse
-        is_child_of_canvas_frame = False
         while parent_check is not None:
-             if parent_check == self.frame_interno:
-                  is_child_of_canvas_frame = True
+             if parent_check == self.frame_interno: # Scroll na lista da calculadora
+                  target_canvas = self.canvas
                   break
+             # Verifica se está dentro do canvas de PDF ou do seu label filho
+             if hasattr(self, 'pdf_preview_canvas') and (parent_check == self.pdf_preview_canvas or parent_check == self.pdf_preview_image_label):
+                 # ATENÇÃO: Scroll no canvas de PDF não está implementado por padrão
+                 # Esta parte apenas identifica que o mouse está sobre ele.
+                 # Para scroll de imagem/zoom, seria necessário implementar a lógica aqui.
+                 # target_canvas = self.pdf_preview_canvas # Descomente se implementar scroll no PDF
+                 print("Scroll sobre área de PDF (não implementado)") # Apenas para debug
+                 return # Impede o scroll padrão no canvas de PDF por enquanto
              parent_check = parent_check.master # Sobe na hierarquia
 
-        if widget_sob_mouse == self.canvas or is_child_of_canvas_frame:
+        # Se o alvo for o canvas da calculadora, faz o scroll
+        if target_canvas == self.canvas:
             delta = 0
             if platform.system() == 'Windows':
                 delta = -1 * int(event.delta / 120)
@@ -1540,7 +1808,7 @@ class CalculadoraImobiliaria:
                 elif event.num == 5: delta = 1
 
             if delta != 0: # Só rola se houver delta
-                 self.canvas.yview_scroll(delta, "units")
+                 target_canvas.yview_scroll(delta, "units")
 
 
 # --- Inicialização ---
@@ -1550,18 +1818,34 @@ def main():
     # ... (código do ícone) ...
 
     app = CalculadoraImobiliaria(root)
+
+    # Adiciona uma rotina para fechar o documento PDF ao sair
+    def on_closing():
+        if hasattr(app, 'pdf_preview_doc') and app.pdf_preview_doc:
+            print("Fechando documento PDF aberto...")
+            app.pdf_preview_doc.close()
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
 
 if __name__ == "__main__":
-    # Verifica se o ReportLab está disponível e avisa se não estiver
+    # Verifica dependências e avisa
     if not REPORTLAB_AVAILABLE:
         temp_root = tk.Tk()
         temp_root.withdraw()
-        messagebox.showwarning("Dependência Ausente",
-                               "A biblioteca 'ReportLab' não foi encontrada.\nA funcionalidade de gerar PDF estará desativada.\n\nPara habilitá-la, feche a aplicação e instale usando o comando no terminal:\npython -m pip install reportlab",
+        messagebox.showwarning("Dependência Ausente: ReportLab",
+                               "A biblioteca 'ReportLab' não foi encontrada.\nA funcionalidade de gerar PDF estará desativada.\n\nInstale com: pip install reportlab",
                                parent=None)
         temp_root.destroy()
-        # Decide se quer continuar sem PDF ou sair
         # return # Descomente para sair se ReportLab for essencial
+
+    if not PYMUPDF_AVAILABLE:
+        temp_root = tk.Tk()
+        temp_root.withdraw()
+        messagebox.showwarning("Dependência Ausente: PyMuPDF",
+                               "A biblioteca 'PyMuPDF' (fitz) não foi encontrada.\nA funcionalidade de pré-visualização de PDF na nova aba estará desativada.\n\nInstale com: pip install pymupdf",
+                               parent=None)
+        temp_root.destroy()
 
     main()
